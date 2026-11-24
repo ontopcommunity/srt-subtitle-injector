@@ -23,7 +23,7 @@
  *
  * VIDEO NẰM TRONG IFRAME (player nhúng kiểu <div id="player-wrapper"><iframe ...>):
  *   Trang chính không đọc được giờ phát của video trong iframe khác origin,
- *   nên tool tự nhận diện và hiện hướng dẫn trong bảng:
+ *   nên tool tự nhận diện và chỉ hiện nút "Mở tab player" trong bảng:
  *   Cách 1 (nhanh nhất): bấm "Mở tab player" — mở tab mới chỉ có player,
  *   dán lại lệnh 1 dòng trong tab đó là chạy (video thành top-level).
  *   Cách 2: trong DevTools, bấm khung "top" phía trên console -> chọn iframe
@@ -867,42 +867,20 @@
   startRow.append(startBtn, stopBtn);
   body.appendChild(startRow);
 
-  // Hộp hướng dẫn khi video nằm trong iframe (trang chính không đọc được giờ phát)
+  // Nút "Mở tab player" — chỉ hiện khi video nằm trong iframe (không còn bảng vàng giải thích)
   const noticeBox = document.createElement('div');
-  noticeBox.style.cssText = 'display:none;background:#3a2f00;border:1px solid #a88400;border-radius:8px;padding:10px;margin:8px 0;color:#ffe9a8;font-size:12px;line-height:1.6;';
-  const noticeText = document.createElement('div');
-  noticeBox.appendChild(noticeText);
-  const noticeBtns = document.createElement('div');
-  noticeBtns.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
+  noticeBox.style.cssText = 'display:none;margin:4px 0;';
   const openPlayerBtn = mkBtn('Mở tab player', '#16a34a');
-  const copyCmdBtn = mkBtn('Sao chép lệnh', '#555');
-  noticeBtns.append(openPlayerBtn, copyCmdBtn);
-  noticeBox.appendChild(noticeBtns);
+  noticeBox.appendChild(openPlayerBtn);
   body.appendChild(noticeBox);
   let noticePlayer = null;
   function showPlayerNotice(players) {
     noticePlayer = players[0];
-    noticeText.innerHTML = '⚠ Video nằm trong <b>iframe</b> (' + escapeHtml(noticePlayer.host || 'player') + ', ' + noticePlayer.w + '×' + noticePlayer.h + ') — trang chính không đọc được giờ phát nên không chèn trực tiếp được.<br><b>Cách 1:</b> bấm "Mở tab player" rồi dán lại lệnh 1 dòng trong tab mới.<br><b>Cách 2:</b> trong DevTools, bấm khung "top" trên console → chọn iframe ' + escapeHtml(noticePlayer.host || '') + ' → dán lại lệnh.<br>File .srt lưu theo host của player — chọn 1 lần cho mỗi host là xong.';
     noticeBox.style.display = '';
   }
   function hidePlayerNotice() { noticeBox.style.display = 'none'; }
   openPlayerBtn.onclick = () => {
     if (noticePlayer && noticePlayer.url) (origOpen || window.open).call(window, noticePlayer.url, '_blank');   // dùng window.open gốc để không bị chặn quảng cáo chặn luôn
-  };
-  copyCmdBtn.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(LOADER);
-      copyCmdBtn.textContent = 'Đã chép!';
-    } catch (e) {
-      const ta = document.createElement('textarea');
-      ta.value = LOADER;
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); copyCmdBtn.textContent = 'Đã chép!'; }
-      catch (e2) { copyCmdBtn.textContent = 'Chép tay vậy'; }
-      ta.remove();
-    }
-    setTimeout(() => (copyCmdBtn.textContent = 'Sao chép lệnh'), 1500);
   };
 
   // Hàng: chọn video (nếu trang có nhiều video)
