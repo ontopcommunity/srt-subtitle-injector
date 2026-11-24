@@ -36,7 +36,7 @@ Trong bảng có khung **"🔍 Tìm phụ đề (SubtitleCat)"**:
 2. Bấm 1 kết quả → hiện list ngôn ngữ (tiếng Việt lên đầu, rồi English, rồi các tiếng khác).
 3. Bấm 1 ngôn ngữ → file `.srt` được tải về và **chạy phụ đề luôn** (đồng thời lưu sẵn trong máy như file tự chọn).
 
-Vì subtitlecat.com chặn đọc từ web khác (CORS), script tải qua các đường trung gian: r.jina.ai (trang HTML), api.cors.lol / allorigins / codetabs (file .srt) — đường nào sống thì dùng đường đó. Nếu tất cả đều bận (bị giới hạn lượt), bảng sẽ báo, đợi 1 phút rồi bấm Tìm lại.
+Vì subtitlecat.com chặn đọc từ web khác (CORS), script tải qua các đường trung gian: r.jina.ai (trang HTML), api.cors.lol / allorigins / codetabs (file .srt) — chạy song song tất cả các đường, đường nào trả về nội dung đúng trước thì lấy ngay (thường 2–3 giây), trang báo lỗi bị loại. Nếu tất cả đều bận, bảng báo rõ lý do từng đường, đợi 1 phút rồi bấm Tìm lại.
 
 ## Chặn quảng cáo nhảy trang
 
