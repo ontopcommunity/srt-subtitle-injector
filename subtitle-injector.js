@@ -31,10 +31,11 @@
  *
  * XEM DỌC (tự động khi chạy lệnh / khi bấm Bắt đầu, tắt được trong bảng):
  *   Video được phóng to lấp màn hình DỌC, vẫn ở nguyên trang web (không
- *   chuyển tab, không fullscreen ngang của trình duyệt):
- *   - Video ngang (16:9...) được xoay 90° để lấp màn dọc (nút "Đổi chiều"
- *     xoay ngược lại -90° nếu thấy ngược).
- *   - Video dọc sẵn thì không xoay, chỉ phóng to theo chiều cao.
+ *   chuyển tab, không fullscreen ngang của trình duyệt) — KHÔNG xoay video:
+ *   - Video ngang (16:9...) giữ nguyên chiều ngang, phóng to lấp hết chiều
+ *     rộng màn dọc, căn giữa theo chiều cao (thanh "Độ phóng" kéo to thêm,
+ *     tối đa 2x, sẽ cắt 2 bên).
+ *   - Video dọc sẵn thì phóng to lấp chiều cao.
  *   - Phụ đề vẫn bám đúng khung hình đang hiển thị, chữ thẳng để đọc.
  *   - Thoát bằng nút "✕ Thoát xem dọc" góc trái trên, phím Esc, hoặc nút
  *     "Xem dọc" trong bảng. Đổi video / xoay màn hình tự tính lại cỡ.
@@ -64,7 +65,7 @@
     show: true,
     turbo: true,         // chế độ siêu tối ưu
     autoPortrait: true,  // tự phóng to dọc khi chạy / khi bấm Bắt đầu
-    dir: 90,             // chiều xoay video ngang: 90 hoặc -90
+    zoom: 1,             // độ phóng thêm ở chế độ xem dọc: 1 = vừa khít, tối đa 2
   };
 
   // Lệnh 1 dòng để chạy lại tool (dùng cho nút "Sao chép lệnh")
@@ -331,21 +332,22 @@
 
   /* ---------- Xem dọc: phóng to video lấp màn dọc, vẫn ở nguyên trang ---------- */
   // Tính khung hiển thị cho màn dọc (thuần toán, không chạm DOM — để test được).
-  // vw/vh: kích thước viewport; A: tỉ lệ ngang/dọc của video (w/h); dir: 90 | -90.
-  // Video ngang (A>=1) xoay 90° để lấp màn dọc; video dọc sẵn (A<1) không xoay.
-  // Trả về { elW, elH } (cỡ phần tử TRƯỚC khi xoay), rotate, và { boxW, boxH }
-  // (khung hình nhìn thấy SAU khi xoay — dùng để đặt khung phụ đề).
-  function portraitBox(vw, vh, A, dir) {
-    let elW, elH, rotate = 0;
+  // vw/vh: kích thước viewport; A: tỉ lệ ngang/dọc của video (w/h); zoom: 1..2.
+  // KHÔNG xoay video: video ngang (A>=1) lấp chiều rộng màn dọc (zoom>1 thì
+  // to thêm, cắt 2 bên); video dọc sẵn (A<1) lấp chiều cao.
+  // Trả về { elW, elH } = cỡ phần tử = khung hình nhìn thấy (boxW, boxH).
+  function portraitBox(vw, vh, A, zoom) {
+    let elW, elH;
     if (A >= 1) {
-      rotate = dir;
-      elW = Math.min(vh, vw * A);
+      elW = vw * zoom;
       elH = elW / A;
+      if (elH > vh) { elH = vh; elW = elH * A; }   // phóng quá thì chặn theo chiều cao
     } else {
-      elW = Math.min(vw, vh * A);
-      elH = elW / A;
+      elH = vh;
+      elW = elH * A;
+      if (elW > vw) { elW = vw; elH = elW / A; }
     }
-    return { elW, elH, rotate, boxW: rotate ? elH : elW, boxH: rotate ? elW : elH };
+    return { elW, elH, rotate: 0, boxW: elW, boxH: elH };
   }
 
   // Mục tiêu để phóng to dọc: video đang chạy, nếu không có thì iframe player.
@@ -380,11 +382,11 @@
       const r = portraitEl.getBoundingClientRect();
       if (r.width > 0 && r.height > 0) A = r.width / r.height;
     }
-    const b = portraitBox(vw, vh, A, settings.dir);
+    const b = portraitBox(vw, vh, A, settings.zoom);
     const st = {
       position: 'fixed', left: '50%', top: '50%', zIndex: '2147483646',
       width: b.elW + 'px', height: b.elH + 'px',
-      transform: 'translate(-50%, -50%) rotate(' + b.rotate + 'deg)',
+      transform: 'translate(-50%, -50%)',
       margin: '0', maxWidth: 'none', maxHeight: 'none',
       background: '#000',
     };
@@ -801,12 +803,6 @@
   };
   const portraitBtn = mkBtn('⤢ Xem dọc');
   portraitBtn.onclick = togglePortrait;
-  const dirBtn = mkBtn('↻ Đổi chiều');
-  dirBtn.onclick = () => {
-    settings.dir = settings.dir === 90 ? -90 : 90;
-    saveSettings();
-    if (portrait) layoutPortrait();
-  };
   const ppBtn = mkBtn('⏯');
   ppBtn.onclick = () => {
     if (!video) return;
@@ -820,8 +816,20 @@
   }
   const pRow = document.createElement('div');
   pRow.style.cssText = 'display:flex;gap:6px;align-items:center;margin:2px 0 8px;flex-wrap:wrap;';
-  pRow.append(mkChkLab(portraitChk, 'Phóng to dọc khi bắt đầu'), portraitBtn, dirBtn, ppBtn);
+  pRow.append(mkChkLab(portraitChk, 'Phóng to dọc khi bắt đầu'), portraitBtn, ppBtn);
   body.appendChild(pRow);
+
+  // Hàng: độ phóng thêm ở chế độ xem dọc (1 = vừa khít chiều rộng, tối đa 2x)
+  const zoomInput = mkInput('range', { min: 1, max: 2, step: 0.05, value: settings.zoom });
+  const zoomVal = mkVal(Math.round(settings.zoom * 100) + '%');
+  zoomInput.oninput = () => {
+    settings.zoom = +zoomInput.value;
+    zoomVal.textContent = Math.round(settings.zoom * 100) + '%';
+    saveSettings();
+    if (portrait) layoutPortrait();
+  };
+  const zoomRow = row('Độ phóng', zoomInput); zoomRow.appendChild(zoomVal);
+  body.appendChild(zoomRow);
 
   // Dòng trạng thái (cập nhật tối đa 1 lần/giây)
   const statusEl = document.createElement('div');
