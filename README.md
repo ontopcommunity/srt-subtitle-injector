@@ -18,10 +18,10 @@ fetch('https://raw.githubusercontent.com/ontopcommunity/srt-subtitle-injector/ma
 
 ## Xem dọc — tự động phóng to lấp màn dọc, vẫn ở nguyên trang
 
-Khi chạy lệnh (hoặc bấm **▶ Bắt đầu**), video tự động phóng to lấp màn hình **dọc** mà không chuyển tab, không dùng fullscreen ngang của trình duyệt:
+Khi chạy lệnh (hoặc bấm **▶ Bắt đầu**), video tự động phóng to lấp màn hình **dọc** mà không chuyển tab, không dùng fullscreen ngang của trình duyệt — và **không xoay video**:
 
-- Video ngang (16:9...) được **xoay 90°** để lấp màn dọc — màn 360×640 thì video 16:9 lấp đúng 360×640, không méo hình. Nút **"↻ Đổi chiều"** xoay ngược -90° nếu thấy ngược.
-- Video dọc sẵn thì không xoay, chỉ phóng to theo chiều cao.
+- Video ngang (16:9...) giữ nguyên chiều ngang, phóng to lấp hết chiều rộng màn dọc, căn giữa theo chiều cao. Thanh **"Độ phóng"** kéo to thêm (tối đa 2x, sẽ cắt 2 bên nếu phóng quá).
+- Video dọc sẵn thì phóng to lấp chiều cao.
 - Phụ đề vẫn bám đúng khung hình đang hiển thị, chữ thẳng để đọc.
 - Thoát bằng nút **"✕ Thoát xem dọc"** góc trái trên, phím **Esc**, hoặc nút **"Xem dọc"** trong bảng. Đổi video / xoay màn hình tự tính lại cỡ.
 - Bỏ tick **"Phóng to dọc khi bắt đầu"** trong bảng nếu không muốn tự động.
