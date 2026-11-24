@@ -29,6 +29,16 @@
  *   Cách 2: trong DevTools, bấm khung "top" phía trên console -> chọn iframe
  *   của player -> dán lại lệnh 1 dòng. File .srt lưu theo host của player.
  *
+ * XEM DỌC (tự động khi chạy lệnh / khi bấm Bắt đầu, tắt được trong bảng):
+ *   Video được phóng to lấp màn hình DỌC, vẫn ở nguyên trang web (không
+ *   chuyển tab, không fullscreen ngang của trình duyệt):
+ *   - Video ngang (16:9...) được xoay 90° để lấp màn dọc (nút "Đổi chiều"
+ *     xoay ngược lại -90° nếu thấy ngược).
+ *   - Video dọc sẵn thì không xoay, chỉ phóng to theo chiều cao.
+ *   - Phụ đề vẫn bám đúng khung hình đang hiển thị, chữ thẳng để đọc.
+ *   - Thoát bằng nút "✕ Thoát xem dọc" góc trái trên, phím Esc, hoặc nút
+ *     "Xem dọc" trong bảng. Đổi video / xoay màn hình tự tính lại cỡ.
+ *
  * Chạy lại lệnh bất cứ lúc nào để reset sạch (bản cũ tự gỡ trước khi chạy mới).
  * Không gửi dữ liệu đi đâu. Cài đặt + file .srt lưu trong localStorage.
  * ========================================================================== */
@@ -53,6 +63,8 @@
     bold: true,
     show: true,
     turbo: true,         // chế độ siêu tối ưu
+    autoPortrait: true,  // tự phóng to dọc khi chạy / khi bấm Bắt đầu
+    dir: 90,             // chiều xoay video ngang: 90 hoặc -90
   };
 
   // Lệnh 1 dòng để chạy lại tool (dùng cho nút "Sao chép lệnh")
@@ -167,6 +179,13 @@
   let parentOrigPos = '';
   let parentEl = null;
   let turboStyleEl = null;
+  let portrait = false;      // đang ở chế độ xem dọc hay không
+  let portraitEl = null;     // phần tử đang phóng to dọc (video hoặc iframe player)
+  let savedPortraitStyle = '';
+  let backdropEl = null;
+  let exitBtnEl = null;
+  let portraitTimer = 0;
+  let portraitLeft = 0;
 
   /* ---------- Lớp phủ phụ đề (bám theo video, kể cả fullscreen) ---------- */
   const overlay = document.createElement('div');
@@ -205,7 +224,7 @@
   // Gắn lớp phủ vào thẻ cha của video; nếu đang fullscreen thì gắn vào chính
   // phần tử fullscreen (để phụ đề không bị mất khi xem full màn hình).
   function attachOverlay() {
-    if (!video || destroyed) return;
+    if (!video || destroyed || portrait) return;   // xem dọc: phụ đề dùng khung fixed riêng
     const fs = document.fullscreenElement;
     const host = (fs && fs.contains(video)) ? fs : video.parentElement;
     if (!host) return;
@@ -309,6 +328,146 @@
       }
     }
   }
+
+  /* ---------- Xem dọc: phóng to video lấp màn dọc, vẫn ở nguyên trang ---------- */
+  // Tính khung hiển thị cho màn dọc (thuần toán, không chạm DOM — để test được).
+  // vw/vh: kích thước viewport; A: tỉ lệ ngang/dọc của video (w/h); dir: 90 | -90.
+  // Video ngang (A>=1) xoay 90° để lấp màn dọc; video dọc sẵn (A<1) không xoay.
+  // Trả về { elW, elH } (cỡ phần tử TRƯỚC khi xoay), rotate, và { boxW, boxH }
+  // (khung hình nhìn thấy SAU khi xoay — dùng để đặt khung phụ đề).
+  function portraitBox(vw, vh, A, dir) {
+    let elW, elH, rotate = 0;
+    if (A >= 1) {
+      rotate = dir;
+      elW = Math.min(vh, vw * A);
+      elH = elW / A;
+    } else {
+      elW = Math.min(vw, vh * A);
+      elH = elW / A;
+    }
+    return { elW, elH, rotate, boxW: rotate ? elH : elW, boxH: rotate ? elW : elH };
+  }
+
+  // Mục tiêu để phóng to dọc: video đang chạy, nếu không có thì iframe player.
+  function portraitTarget() {
+    if (video) return video;
+    const players = findPlayerIframes();
+    return players.length ? players[0].el : null;
+  }
+
+  function resetOverlayStyle() {
+    Object.assign(overlay.style, {
+      position: 'absolute', top: '0', left: '0', right: '0', bottom: '0',
+      width: '100%', height: '100%', transform: '',
+    });
+  }
+
+  function restorePortraitEl() {
+    if (!portraitEl) return;
+    if (savedPortraitStyle) portraitEl.setAttribute('style', savedPortraitStyle);
+    else portraitEl.removeAttribute('style');
+    portraitEl = null;
+  }
+
+  // Áp lại cỡ/vị trí theo viewport hiện tại (gọi khi vào chế độ + khi xoay màn hình).
+  function layoutPortrait() {
+    if (!portrait || !portraitEl) return;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let A = 16 / 9;
+    if (portraitEl.tagName === 'VIDEO' && portraitEl.videoWidth > 0) {
+      A = portraitEl.videoWidth / portraitEl.videoHeight;
+    } else {
+      const r = portraitEl.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) A = r.width / r.height;
+    }
+    const b = portraitBox(vw, vh, A, settings.dir);
+    const st = {
+      position: 'fixed', left: '50%', top: '50%', zIndex: '2147483646',
+      width: b.elW + 'px', height: b.elH + 'px',
+      transform: 'translate(-50%, -50%) rotate(' + b.rotate + 'deg)',
+      margin: '0', maxWidth: 'none', maxHeight: 'none',
+      background: '#000',
+    };
+    if (portraitEl.tagName === 'VIDEO') st.objectFit = 'contain';
+    Object.assign(portraitEl.style, st);
+    // Khung phụ đề: fixed, căn giữa, khớp đúng khung hình đang hiển thị, chữ thẳng.
+    Object.assign(overlay.style, {
+      position: 'fixed', left: '50%', top: '50%', right: 'auto', bottom: 'auto',
+      width: b.boxW + 'px', height: b.boxH + 'px',
+      transform: 'translate(-50%, -50%)',
+    });
+    if (overlay.parentElement !== document.body) document.body.appendChild(overlay);
+  }
+
+  function ensurePortraitChrome() {
+    if (!backdropEl) {
+      backdropEl = document.createElement('div');
+      Object.assign(backdropEl.style, {
+        position: 'fixed', inset: '0', background: '#000',
+        zIndex: '2147483645', pointerEvents: 'none',
+      });
+    }
+    if (!exitBtnEl) {
+      exitBtnEl = document.createElement('button');
+      exitBtnEl.textContent = '✕ Thoát xem dọc (Esc)';
+      Object.assign(exitBtnEl.style, {
+        position: 'fixed', top: '12px', left: '12px', zIndex: '2147483647',
+        background: 'rgba(20,20,25,.85)', color: '#fff', border: '1px solid #555',
+        borderRadius: '8px', padding: '8px 12px', fontSize: '13px', cursor: 'pointer',
+      });
+      exitBtnEl.onclick = exitPortrait;
+    }
+    if (!backdropEl.parentElement) document.body.appendChild(backdropEl);
+    if (!exitBtnEl.parentElement) document.body.appendChild(exitBtnEl);
+  }
+
+  function enterPortrait() {
+    const target = portraitTarget();
+    if (!target || destroyed) return false;
+    if (portraitEl && portraitEl !== target) restorePortraitEl();
+    if (!portraitEl || portraitEl !== target) {
+      savedPortraitStyle = target.getAttribute('style') || '';
+      portraitEl = target;
+    }
+    portrait = true;
+    ensurePortraitChrome();
+    layoutPortrait();
+    window.addEventListener('resize', onPortraitResize);
+    window.addEventListener('orientationchange', onPortraitResize);
+    updatePortraitBtn();
+    return true;
+  }
+
+  function onPortraitResize() { if (portrait) layoutPortrait(); }
+
+  function exitPortrait() {
+    if (!portrait && !portraitEl) return;
+    portrait = false;
+    restorePortraitEl();
+    window.removeEventListener('resize', onPortraitResize);
+    window.removeEventListener('orientationchange', onPortraitResize);
+    if (backdropEl && backdropEl.parentElement) backdropEl.parentElement.removeChild(backdropEl);
+    if (exitBtnEl && exitBtnEl.parentElement) exitBtnEl.parentElement.removeChild(exitBtnEl);
+    resetOverlayStyle();
+    if (running && video) attachOverlay();
+    else if (overlay.parentElement) overlay.parentElement.removeChild(overlay);
+    updatePortraitBtn();
+  }
+
+  function togglePortrait() { if (portrait) exitPortrait(); else enterPortrait(); }
+
+  // Thử phóng to dọc vài lần (video/player có thể chưa load xong lúc chạy lệnh).
+  function tryAutoPortrait() {
+    clearTimeout(portraitTimer);
+    if (portrait || destroyed) return;
+    if (enterPortrait()) return;
+    if (portraitLeft > 0) {
+      portraitLeft--;
+      portraitTimer = setTimeout(tryAutoPortrait, 500);
+    }
+  }
+
+  function onKey(e) { if (e.key === 'Escape' && portrait) exitPortrait(); }
 
   /* ---------- Bảng điều khiển ---------- */
   const panel = document.createElement('div');
@@ -461,8 +620,10 @@
     video = v;
     lastIdx = -1;
     attachOverlay();
+    if (portrait) enterPortrait();   // đổi video -> phóng to dọc lại trên video mới
     if (running) attachVideoListeners(v);
     updateStatus();
+    updatePortraitBtn();
   }
   videoSel.onchange = () => {
     const list = findVideos();
@@ -631,6 +792,37 @@
   turboRow.appendChild(turboLab);
   body.appendChild(turboRow);
 
+  // Hàng: xem dọc
+  const portraitChk = document.createElement('input');
+  portraitChk.type = 'checkbox'; portraitChk.checked = settings.autoPortrait;
+  portraitChk.onchange = () => {
+    settings.autoPortrait = portraitChk.checked; saveSettings();
+    if (settings.autoPortrait && !portrait) enterPortrait();
+  };
+  const portraitBtn = mkBtn('⤢ Xem dọc');
+  portraitBtn.onclick = togglePortrait;
+  const dirBtn = mkBtn('↻ Đổi chiều');
+  dirBtn.onclick = () => {
+    settings.dir = settings.dir === 90 ? -90 : 90;
+    saveSettings();
+    if (portrait) layoutPortrait();
+  };
+  const ppBtn = mkBtn('⏯');
+  ppBtn.onclick = () => {
+    if (!video) return;
+    if (video.paused) video.play().catch(() => {});
+    else video.pause();
+  };
+  function updatePortraitBtn() {
+    // Chỉ được gọi sau khi bảng đã dựng xong (mọi đường gọi đều sau init).
+    portraitBtn.textContent = portrait ? 'Thoát xem dọc' : '⤢ Xem dọc';
+    ppBtn.disabled = !video;
+  }
+  const pRow = document.createElement('div');
+  pRow.style.cssText = 'display:flex;gap:6px;align-items:center;margin:2px 0 8px;flex-wrap:wrap;';
+  pRow.append(mkChkLab(portraitChk, 'Phóng to dọc khi bắt đầu'), portraitBtn, dirBtn, ppBtn);
+  body.appendChild(pRow);
+
   // Dòng trạng thái (cập nhật tối đa 1 lần/giây)
   const statusEl = document.createElement('div');
   statusEl.style.cssText = 'margin-top:6px;padding-top:8px;border-top:1px solid #2a2a2a;color:#999;font-size:12px;line-height:1.5;min-height:18px;';
@@ -719,6 +911,7 @@
     const players = findPlayerIframes();
     if (players.length) {
       showPlayerNotice(players);
+      if (settings.autoPortrait) enterPortrait();   // phóng to dọc ngay trên iframe player
       setStatus('Video nằm trong iframe — xem hướng dẫn trong bảng.');
     } else {
       setStatus('Không thấy video nào — mở video rồi bấm Bắt đầu lại.');
@@ -733,8 +926,10 @@
     stopBtn.disabled = false;
     if (video) attachVideoListeners(video);
     if (settings.turbo) applyTurbo(true);
+    if (settings.autoPortrait) enterPortrait();
     updateSub();   // hiện đúng câu tại thời điểm hiện tại ngay
     setStatus('Đang chạy — phụ đề theo video.');
+    updatePortraitBtn();
   }
 
   startBtn.onclick = () => {
@@ -765,8 +960,11 @@
   function destroy() {
     destroyed = true;
     clearTimeout(scanTimer);
+    clearTimeout(portraitTimer);
     stopRunning();
+    exitPortrait();
     document.removeEventListener('fullscreenchange', onFs);
+    document.removeEventListener('keydown', onKey);
     if (panel.parentElement) panel.parentElement.removeChild(panel);
     if (parentEl && parentEl.style.position === 'relative') {
       parentEl.style.position = parentOrigPos;
@@ -792,7 +990,7 @@
     get running() { return running; },
   };
 
-  /* ---------- Khởi động: chỉ hiện bảng, chưa quét, chưa chạy gì ---------- */
+  /* ---------- Khởi động ---------- */
   document.body.appendChild(panel);
   loadSavedFile();   // nạp file .srt đã lưu sẵn (nếu có) — chưa chạy phụ đề
   // Nếu trang không có video trực tiếp mà có iframe player thì hiện hướng dẫn ngay.
@@ -800,7 +998,15 @@
     const players = findPlayerIframes();
     if (players.length) showPlayerNotice(players);
   }
+  document.addEventListener('keydown', onKey);   // Esc thoát xem dọc
   updateStatus(true);
+  // Tự động khi chạy lệnh: có file lưu sẵn thì chạy phụ đề luôn; luôn thử phóng to dọc.
+  if (cues.length) {
+    startBtn.onclick();
+  } else if (settings.autoPortrait) {
+    portraitLeft = 8;   // thử tối đa ~4 giây rồi dừng hẳn
+    tryAutoPortrait();
+  }
   console.log('%c[SRT Injector] đã sẵn sàng. Chọn file .srt (chỉ cần 1 lần, sẽ lưu sẵn) rồi bấm Bắt đầu.',
     'color:#0ea5a4;font-weight:bold;');
 })();
