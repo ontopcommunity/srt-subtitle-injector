@@ -50,7 +50,7 @@ Nút "Mở tab player" vẫn mở được bình thường. Muốn duyệt web b
 
 ## Chọn video bằng cách bấm vào nó
 
-Bấm nút **"🎯 Chọn video"** trong bảng → di chuột lên video đang phát (nó viền xanh) → bấm vào video để lưu lại làm video mục tiêu. Bấm vào khung player (iframe) thì lưu khung đó. Lần sau chạy lệnh, video/khung đã lưu được dùng luôn, khỏi quét lại. Bấm vào bảng hoặc phím Esc để hủy chọn.
+Bấm nút **"🎯 Chọn video"** trong bảng → di chuột lên video đang phát (nó viền xanh) → bấm vào video để lưu lại làm video mục tiêu. Trên điện thoại thì chạm thẳng vào khung video — script tự nhận diện element tại điểm chạm, bấm đúng mảng chứa video (kể cả bấm vào lớp phủ nút bấm/quảng cáo trên mặt video) là lấy video đó và bám theo thời gian của nó luôn. Bấm vào khung player (iframe) thì lưu khung đó. Lần sau chạy lệnh, video/khung đã lưu được dùng luôn, khỏi quét lại. Bấm vào bảng hoặc phím Esc để hủy chọn.
 
 ## Video nằm trong iframe (player nhúng)
 
