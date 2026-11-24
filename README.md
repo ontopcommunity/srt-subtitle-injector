@@ -60,7 +60,7 @@ Nhiều web phim nhúng player kiểu này:
 <div id="player-wrapper"><iframe src="https://e.streamforester.name/videos/.../play?..."></iframe></div>
 ```
 
-Trang chính **không đọc được giờ phát** của video trong iframe khác origin, nên tool không chèn trực tiếp được. Tool tự nhận diện trường hợp này và hiện hướng dẫn trong bảng, có 2 cách chạy:
+Trang chính **không đọc được giờ phát** của video trong iframe khác origin, nên tool không chèn trực tiếp được. Tool tự nhận diện trường hợp này và chỉ hiện nút **"Mở tab player"** trong bảng (không còn bảng vàng giải thích). Có 2 cách chạy:
 
 1. **Mở tab player (nhanh nhất):** bấm nút **"Mở tab player"** trong bảng — mở tab mới chỉ có player, dán lại lệnh 1 dòng trong tab đó là chạy (video thành top-level).
 2. **Chạy trong iframe:** trong DevTools, bấm khung **"top"** phía trên console → chọn iframe của player → dán lại lệnh 1 dòng. Tiêu đề bảng sẽ hiện "trong iframe".
