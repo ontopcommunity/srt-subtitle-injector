@@ -16,6 +16,21 @@ fetch('https://raw.githubusercontent.com/ontopcommunity/srt-subtitle-injector/ma
 2. Bảng điều khiển hiện ở góc phải màn hình. Chọn file `.srt` **1 lần duy nhất** — file được lưu sẵn trong máy, lần sau chạy lệnh là có sẵn, không cần chọn lại (cũng có thể dán link `.srt` hoặc kéo-thả file vào bảng).
 3. Bấm **▶ Bắt đầu** — tool quét video đang chạy 1 lần duy nhất, chèn phụ đề vào rồi ngừng quét hẳn. Phụ đề tự hiện theo đúng thời gian trong file, bám theo video kể cả khi xem fullscreen. Bấm **⏸ Dừng** để tắt.
 
+## Video nằm trong iframe (player nhúng)
+
+Nhiều web phim nhúng player kiểu này:
+
+```html
+<div id="player-wrapper"><iframe src="https://e.streamforester.name/videos/.../play?..."></iframe></div>
+```
+
+Trang chính **không đọc được giờ phát** của video trong iframe khác origin, nên tool không chèn trực tiếp được. Tool tự nhận diện trường hợp này và hiện hướng dẫn trong bảng, có 2 cách chạy:
+
+1. **Mở tab player (nhanh nhất):** bấm nút **"Mở tab player"** trong bảng — mở tab mới chỉ có player, dán lại lệnh 1 dòng trong tab đó là chạy (video thành top-level).
+2. **Chạy trong iframe:** trong DevTools, bấm khung **"top"** phía trên console → chọn iframe của player → dán lại lệnh 1 dòng. Tiêu đề bảng sẽ hiện "trong iframe".
+
+Lưu ý: file `.srt` lưu theo host của player — chọn 1 lần cho mỗi host là xong.
+
 ## Siêu tối ưu (bật mặc định, tắt được trong bảng)
 
 - **Không vòng lặp, không quét liên tục:** phụ đề đồng bộ theo sự kiện của video (`timeupdate` / `seeking` / `seeked`) — không dùng `requestAnimationFrame`, không `setInterval`. Tua đến đâu phụ đề bay đến đó ngay lập tức, kể cả bấm sang mốc thời gian khác trong video.
