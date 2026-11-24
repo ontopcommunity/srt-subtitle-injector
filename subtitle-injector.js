@@ -1,17 +1,28 @@
 /* ============================================================================
- * SRT Subtitle Injector — chèn phụ đề .srt vào video đang phát trên bất kỳ web nào
+ * SRT Subtitle Injector v1.1 — chèn phụ đề .srt vào video đang phát
  * ----------------------------------------------------------------------------
- * CÁCH DÙNG (dán 1 dòng vào console của DevTools, thay bằng link raw của bạn):
+ * CÁCH DÙNG (dán 1 dòng vào console của DevTools):
  *   fetch('https://raw.githubusercontent.com/ontopcommunity/srt-subtitle-injector/main/subtitle-injector.js')
  *     .then(r => r.text()).then(t => eval(t))
  *
- * Sau khi chạy, một bảng điều khiển hiện ở góc phải màn hình:
- *   - Chọn file .srt (hoặc .vtt) / dán link file .srt / kéo-thả file vào bảng
- *   - Chỉnh cỡ chữ, vị trí, màu chữ, nền, căn lề, độ lệch thời gian (sync)
- *   - Phụ đề tự khớp theo thời gian trong file .srt, bám theo video kể cả fullscreen
+ * LUỒNG MỚI:
+ *   1. Chọn file .srt 1 lần — file được LƯU SẴN trong máy (localStorage),
+ *      lần sau chạy lệnh là có sẵn, không cần chọn lại.
+ *   2. Bấm "▶ Bắt đầu" — tool quét video đang chạy 1 lần duy nhất, chèn
+ *      phụ đề vào rồi NGỪNG QUÉT hẳn (không còn vòng lặp nào chạy nền).
+ *   3. Phụ đề đồng bộ theo sự kiện của video (timeupdate/seeked), không dùng
+ *      requestAnimationFrame: tua đến đâu phụ đề bay đến đó ngay lập tức,
+ *      kể cả bấm sang mốc thời gian khác trong video.
  *
- * Chạy lại lệnh trên bất cứ lúc nào để reset sạch (bản cũ tự gỡ trước khi chạy mới).
- * Không cần cài gì thêm, không gửi dữ liệu đi đâu. Cài đặt được lưu localStorage.
+ * SIÊU TỐI ƯU (bật mặc định, tắt được trong bảng):
+ *   - Không vòng lặp, không setInterval, không quét liên tục — chỉ chạy khi
+ *     video phát sự kiện. Chỉ ghi DOM khi câu phụ đề thật sự đổi.
+ *   - Tạm dừng các video khác trên trang (chỉ giữ video đang xem).
+ *   - Đóng băng hiệu ứng animation/transition của trang (video không ảnh hưởng).
+ *   - Dòng trạng thái chỉ cập nhật tối đa 1 lần/giây.
+ *
+ * Chạy lại lệnh bất cứ lúc nào để reset sạch (bản cũ tự gỡ trước khi chạy mới).
+ * Không gửi dữ liệu đi đâu. Cài đặt + file .srt lưu trong localStorage.
  * ========================================================================== */
 (() => {
   'use strict';
@@ -22,6 +33,8 @@
   }
 
   const STORE_KEY = 'srtInjectorSettings';
+  const FILE_KEY = 'srtInjectorFile';       // { name, text, savedAt }
+  const FILE_MAX = 4000000;                // ~4MB, chừa chỗ cho localStorage (~5MB)
   const DEFAULTS = {
     fontSize: 24,        // px
     bottomPct: 8,        // vị trí phụ đề tính từ đáy video (% chiều cao video)
@@ -31,6 +44,7 @@
     align: 'center',     // left | center | right
     bold: true,
     show: true,
+    turbo: true,         // chế độ siêu tối ưu
   };
 
   /* ---------- Đọc / lưu cài đặt ---------- */
@@ -83,7 +97,7 @@
     return cues;
   }
 
-  /* ---------- Tìm video đang phát ---------- */
+  /* ---------- Tìm video đang phát (quét 1 lần, không quét liên tục) ---------- */
   function findVideos() {
     return [...document.querySelectorAll('video')].filter(v => {
       const r = v.getBoundingClientRect();
@@ -103,11 +117,15 @@
   /* ---------- State ---------- */
   let video = null;
   let cues = [];
+  let savedName = '';
   let lastIdx = -1;          // cue đang hiển thị
-  let rafId = 0;
+  let running = false;       // đã bấm Bắt đầu hay chưa
   let destroyed = false;
-  let parentOrigPos = '';    // position gốc của thẻ cha (để trả lại khi gỡ)
+  let scanTimer = 0;         // timer quét thử lại (tối đa vài lần rồi dừng hẳn)
+  let scanLeft = 0;
+  let parentOrigPos = '';
   let parentEl = null;
+  let turboStyleEl = null;
 
   /* ---------- Lớp phủ phụ đề (bám theo video, kể cả fullscreen) ---------- */
   const overlay = document.createElement('div');
@@ -162,7 +180,7 @@
     }
   }
 
-  /* ---------- Vòng lặp đồng bộ phụ đề theo thời gian video ---------- */
+  /* ---------- Đồng bộ phụ đề — CHỈ chạy khi video phát sự kiện ---------- */
   function currentCue(t) {
     if (!cues.length) return -1;
     if (lastIdx >= 0 && lastIdx < cues.length) {
@@ -176,25 +194,79 @@
     return -1;
   }
 
-  function tick() {
-    if (destroyed) return;
-    if (video && cues.length && settings.show) {
-      const t = video.currentTime + settings.offsetSec;
-      const idx = currentCue(t);
-      if (idx !== lastIdx) {
-        lastIdx = idx;
-        if (idx >= 0) {
-          subEl.innerHTML = cues[idx].html;
-          subEl.style.display = 'block';
-        } else {
-          subEl.style.display = 'none';
-        }
+  // Chỉ ghi DOM khi câu phụ đề thật sự đổi — tua đến đâu bay đến đó ngay.
+  function updateSub() {
+    if (destroyed || !running || !video) return;
+    if (!cues.length || !settings.show) {
+      if (subEl.style.display !== 'none') subEl.style.display = 'none';
+      updateStatus();
+      return;
+    }
+    const t = video.currentTime + settings.offsetSec;
+    const idx = currentCue(t);
+    if (idx !== lastIdx) {
+      lastIdx = idx;
+      if (idx >= 0) {
+        subEl.innerHTML = cues[idx].html;
+        subEl.style.display = 'block';
+      } else {
+        subEl.style.display = 'none';
       }
-    } else if (subEl.style.display !== 'none') {
-      subEl.style.display = 'none';
     }
     updateStatus();
-    rafId = requestAnimationFrame(tick);
+  }
+
+  // Các sự kiện của video — đây là toàn bộ "vòng lặp": không rAF, không interval.
+  function onTimeUpdate() { updateSub(); }
+  function onSeeking() { updateSub(); }    // bấm sang mốc khác -> đổi phụ đề ngay
+  function onSeeked() { updateSub(); }
+  function onPlaying() { updateSub(); }
+  function attachVideoListeners(v) {
+    v.addEventListener('timeupdate', onTimeUpdate);
+    v.addEventListener('seeking', onSeeking);
+    v.addEventListener('seeked', onSeeked);
+    v.addEventListener('playing', onPlaying);
+  }
+  function detachVideoListeners(v) {
+    v.removeEventListener('timeupdate', onTimeUpdate);
+    v.removeEventListener('seeking', onSeeking);
+    v.removeEventListener('seeked', onSeeked);
+    v.removeEventListener('playing', onPlaying);
+  }
+
+  /* ---------- Siêu tối ưu: cắt mọi thứ trừ video đang phát ---------- */
+  const TURBO_CSS = [
+    '.srt-turbo, .srt-turbo * {',
+    '  animation-duration: .01s !important;',
+    '  animation-delay: 0s !important;',
+    '  animation-iteration-count: 1 !important;',
+    '  transition-duration: .01s !important;',
+    '  transition-delay: 0s !important;',
+    '  scroll-behavior: auto !important;',
+    '}',
+  ].join('\n');
+
+  function applyTurbo(on) {
+    const root = document.documentElement;
+    if (on) {
+      if (!turboStyleEl) {
+        turboStyleEl = document.createElement('style');
+        turboStyleEl.id = 'srt-turbo-style';
+        turboStyleEl.textContent = TURBO_CSS;
+        document.head.appendChild(turboStyleEl);
+      }
+      root.classList.add('srt-turbo');
+      // Tạm dừng mọi video khác trên trang, chỉ giữ video đang xem.
+      findVideos().forEach(v => {
+        if (v !== video && !v.paused) { try { v.pause(); } catch (e) { /* kệ */ } }
+      });
+    } else {
+      root.classList.remove('srt-turbo');
+      if (turboStyleEl && turboStyleEl.parentElement) {
+        turboStyleEl.parentElement.removeChild(turboStyleEl);
+        turboStyleEl = null;
+      }
+    }
   }
 
   /* ---------- Bảng điều khiển ---------- */
@@ -225,10 +297,10 @@
     el.style.cssText = 'flex:1;min-width:0;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:5px 7px;';
     return el;
   };
-  const mkBtn = (text) => {
+  const mkBtn = (text, bg) => {
     const b = document.createElement('button');
     b.textContent = text;
-    b.style.cssText = 'background:#0ea5a4;color:#fff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;';
+    b.style.cssText = `background:${bg || '#0ea5a4'};color:#fff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;`;
     return b;
   };
   const mkVal = (text) => {
@@ -271,17 +343,28 @@
 
   minBtn.onclick = () => (body.style.display = body.style.display === 'none' ? '' : 'none');
 
+  // Hàng: Bắt đầu / Dừng
+  const startBtn = mkBtn('▶ Bắt đầu', '#16a34a');
+  startBtn.style.cssText += 'flex:1;padding:8px;font-size:14px;font-weight:bold;';
+  const stopBtn = mkBtn('⏸ Dừng', '#555');
+  stopBtn.style.cssText += 'flex:1;padding:8px;font-size:14px;';
+  stopBtn.disabled = true;
+  const startRow = document.createElement('div');
+  startRow.style.cssText = 'display:flex;gap:8px;margin:10px 0 4px;';
+  startRow.append(startBtn, stopBtn);
+  body.appendChild(startRow);
+
   // Hàng: chọn video (nếu trang có nhiều video)
   const videoSel = document.createElement('select');
   videoSel.style.cssText = 'flex:1;min-width:0;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:5px 7px;';
+  videoSel.innerHTML = '<option value="">Bấm Bắt đầu để quét video</option>';
   function refreshVideoList() {
     const list = findVideos();
     const cur = videoSel.value;
     videoSel.innerHTML = '';
     if (!list.length) {
       videoSel.innerHTML = '<option value="">Không thấy video nào</option>';
-      video = null;
-      return;
+      return list;
     }
     list.forEach((v, i) => {
       const o = document.createElement('option');
@@ -292,12 +375,14 @@
     });
     const idx = Math.max(0, Math.min(+cur || 0, list.length - 1));
     videoSel.value = String(idx);
-    setVideo(list[idx]);
+    return list;
   }
   function setVideo(v) {
+    if (video && video !== v) detachVideoListeners(video);
     video = v;
     lastIdx = -1;
     attachOverlay();
+    if (running) attachVideoListeners(v);
     updateStatus();
   }
   videoSel.onchange = () => {
@@ -305,14 +390,18 @@
     if (list[+videoSel.value]) setVideo(list[+videoSel.value]);
   };
   const rescanBtn = mkBtn('Quét lại');
-  rescanBtn.onclick = refreshVideoList;
+  rescanBtn.onclick = () => {
+    const list = refreshVideoList();
+    if (list.length) setVideo(list[+videoSel.value || 0]);
+    updateStatus();
+  };
   const videoRow = row('Video', videoSel);
   const rescanWrap = document.createElement('span');
   rescanWrap.appendChild(rescanBtn);
   videoRow.appendChild(rescanWrap);
   body.appendChild(videoRow);
 
-  // Hàng: chọn file .srt
+  // Hàng: chọn file .srt (lưu sẵn trong máy)
   const fileInput = mkInput('file', { accept: '.srt,.vtt' });
   fileInput.style.padding = '3px';
   fileInput.onchange = () => {
@@ -320,6 +409,16 @@
     if (f) loadFile(f);
   };
   body.appendChild(row('File .srt', fileInput));
+
+  // Dòng: file đã lưu sẵn trong máy
+  const savedLine = document.createElement('div');
+  savedLine.style.cssText = 'color:#7dd3d2;font-size:12px;margin:-2px 0 4px 94px;min-height:16px;';
+  body.appendChild(savedLine);
+  function showSaved() {
+    savedLine.textContent = cues.length
+      ? `Đã lưu sẵn: ${savedName} — ${cues.length} câu`
+      : 'Chưa có file phụ đề nào được lưu.';
+  }
 
   // Hàng: tải .srt từ link
   const urlInput = mkInput('text', { placeholder: 'https://.../phude.srt' });
@@ -380,6 +479,7 @@
     offInput.value = settings.offsetSec;
     offVal.textContent = (settings.offsetSec > 0 ? '+' : '') + settings.offsetSec.toFixed(1) + 's';
     lastIdx = -1; saveSettings();
+    updateSub();   // đổi lệch giờ -> tính lại câu hiện tại ngay
   }
   offInput.oninput = () => setOffset(+offInput.value);
   const offRow = row('Lệch giờ', offInput);
@@ -423,42 +523,78 @@
   boldChk.onchange = () => { settings.bold = boldChk.checked; applySubStyle(); saveSettings(); };
   const showChk = document.createElement('input');
   showChk.type = 'checkbox'; showChk.checked = settings.show;
-  showChk.onchange = () => { settings.show = showChk.checked; saveSettings(); };
+  showChk.onchange = () => { settings.show = showChk.checked; saveSettings(); updateSub(); };
+  const turboChk = document.createElement('input');
+  turboChk.type = 'checkbox'; turboChk.checked = settings.turbo;
+  turboChk.onchange = () => {
+    settings.turbo = turboChk.checked; saveSettings();
+    if (running) applyTurbo(settings.turbo);
+  };
   const chkRow = document.createElement('div');
-  chkRow.style.cssText = 'display:flex;gap:18px;margin:8px 0;';
-  const boldLab = document.createElement('label');
-  boldLab.style.cssText = 'display:flex;gap:6px;align-items:center;cursor:pointer;';
-  boldLab.append(boldChk, document.createTextNode('Chữ đậm'));
-  const showLab = document.createElement('label');
-  showLab.style.cssText = 'display:flex;gap:6px;align-items:center;cursor:pointer;';
-  showLab.append(showChk, document.createTextNode('Hiện phụ đề'));
-  chkRow.append(boldLab, showLab);
+  chkRow.style.cssText = 'display:flex;gap:14px;margin:8px 0;flex-wrap:wrap;';
+  const mkChkLab = (chk, text) => {
+    const lab = document.createElement('label');
+    lab.style.cssText = 'display:flex;gap:6px;align-items:center;cursor:pointer;';
+    lab.append(chk, document.createTextNode(text));
+    return lab;
+  };
+  chkRow.append(mkChkLab(boldChk, 'Chữ đậm'), mkChkLab(showChk, 'Hiện phụ đề'));
   body.appendChild(chkRow);
+  const turboRow = document.createElement('div');
+  turboRow.style.cssText = 'display:flex;gap:6px;align-items:center;margin:2px 0 8px;';
+  const turboLab = mkChkLab(turboChk, 'Siêu tối ưu (tắt hiệu ứng trang, dừng video khác)');
+  turboRow.appendChild(turboLab);
+  body.appendChild(turboRow);
 
-  // Dòng trạng thái
+  // Dòng trạng thái (cập nhật tối đa 1 lần/giây)
   const statusEl = document.createElement('div');
   statusEl.style.cssText = 'margin-top:6px;padding-top:8px;border-top:1px solid #2a2a2a;color:#999;font-size:12px;line-height:1.5;min-height:18px;';
   body.appendChild(statusEl);
   let statusText = '';
-  function setStatus(s) { statusText = s; statusEl.textContent = s; }
-  function updateStatus() {
+  let lastStatusWrite = 0;
+  let lastStatusStr = '';
+  function setStatus(s) { statusText = s; lastStatusStr = ''; updateStatus(true); }
+  function updateStatus(force) {
     if (!statusEl.isConnected) return;
+    const now = Date.now();
+    if (!force && now - lastStatusWrite < 1000) return;   // throttle 1s
     const vt = video ? video.currentTime.toFixed(1) + 's' : '—';
-    statusEl.textContent = statusText
+    const str = statusText
       ? statusText + (video ? ` | Video: ${vt}` : '')
-      : (video ? `Video: ${vt} | ${cues.length ? cues.length + ' câu phụ đề' : 'Chưa có phụ đề'}` : 'Chưa thấy video — bấm "Quét lại".');
+      : (running
+        ? `Đang chạy | Video: ${vt} | ${cues.length} câu phụ đề`
+        : (video ? `Video: ${vt} | ${cues.length ? cues.length + ' câu phụ đề' : 'Chưa có phụ đề'}` : 'Chưa chạy — bấm "Bắt đầu".'));
+    if (str === lastStatusStr) return;
+    lastStatusStr = str;
+    lastStatusWrite = now;
+    statusEl.textContent = str;
   }
 
-  /* ---------- Nạp file phụ đề ---------- */
-  function loadText(text, name) {
+  /* ---------- Nạp file phụ đề + LƯU SẴN trong máy ---------- */
+  function loadText(text, name, saveIt) {
     cues = parseSRT(text);
     lastIdx = -1;
     if (!cues.length) {
       setStatus('File không đọc được câu nào — kiểm tra lại định dạng .srt.');
-      return;
+      return false;
     }
-    setStatus(`Đã tải "${name}" — ${cues.length} câu.`);
-    updateStatus();
+    savedName = name;
+    if (saveIt !== false) {
+      if (text.length > FILE_MAX) {
+        setStatus(`Đã tải "${name}" — ${cues.length} câu (file quá lớn nên không lưu sẵn được, vẫn chạy lần này).`);
+      } else {
+        try {
+          localStorage.setItem(FILE_KEY, JSON.stringify({ name, text, savedAt: Date.now() }));
+        } catch (e) { /* đầy bộ nhớ -> vẫn chạy, chỉ không lưu được */ }
+        setStatus(`Đã tải + lưu sẵn "${name}" — ${cues.length} câu.`);
+      }
+    } else {
+      setStatus(`Đã tải "${name}" — ${cues.length} câu.`);
+    }
+    showSaved();
+    updateStatus(true);
+    if (running) updateSub();   // đang chạy mà đổi file -> áp dụng ngay
+    return true;
   }
   function loadFile(file) {
     const reader = new FileReader();
@@ -466,15 +602,81 @@
     reader.onerror = () => setStatus('Không đọc được file.');
     reader.readAsText(file);
   }
+  function loadSavedFile() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(FILE_KEY) || 'null');
+      if (raw && raw.text) {
+        if (loadText(raw.text, raw.name || 'phude.srt', false)) {
+          setStatus(`Đã nạp file lưu sẵn "${savedName}" — ${cues.length} câu. Bấm Bắt đầu để chạy.`);
+        }
+      }
+    } catch (e) { /* kệ */ }
+    showSaved();
+  }
+
+  /* ---------- Bắt đầu / Dừng ---------- */
+  // Quét video 1 lần; nếu chưa thấy (video chưa load) thì thử lại vài lần rồi DỪNG HẲN.
+  function scanAndStart() {
+    clearTimeout(scanTimer);
+    const list = refreshVideoList();
+    const v = pickVideo(list);
+    if (v) {
+      setVideo(v);
+      startRunning();
+      return;
+    }
+    if (scanLeft > 0) {
+      scanLeft--;
+      setStatus(`Chưa thấy video đang chạy, thử quét lại... (${scanLeft})`);
+      scanTimer = setTimeout(scanAndStart, 500);
+      return;
+    }
+    setStatus('Không thấy video nào — mở video rồi bấm Bắt đầu lại.');
+    startBtn.disabled = false;
+  }
+
+  function startRunning() {
+    running = true;
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    if (video) attachVideoListeners(video);
+    if (settings.turbo) applyTurbo(true);
+    updateSub();   // hiện đúng câu tại thời điểm hiện tại ngay
+    setStatus('Đang chạy — phụ đề theo video.');
+  }
+
+  startBtn.onclick = () => {
+    if (running) return;
+    if (!cues.length) {
+      setStatus('Chưa có phụ đề — chọn file .srt trước đã.');
+      return;
+    }
+    startBtn.disabled = true;
+    scanLeft = 8;   // quét tối đa ~4 giây rồi dừng hẳn
+    scanAndStart();
+  };
+
+  function stopRunning() {
+    clearTimeout(scanTimer);
+    running = false;
+    if (video) detachVideoListeners(video);
+    applyTurbo(false);
+    if (overlay.parentElement) overlay.parentElement.removeChild(overlay);
+    subEl.style.display = 'none';
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    setStatus('Đã dừng.');
+  }
+  stopBtn.onclick = stopRunning;
 
   /* ---------- Gỡ bỏ sạch ---------- */
   function destroy() {
     destroyed = true;
-    cancelAnimationFrame(rafId);
+    clearTimeout(scanTimer);
+    stopRunning();
     document.removeEventListener('fullscreenchange', onFs);
-    if (overlay.parentElement) overlay.parentElement.removeChild(overlay);
     if (panel.parentElement) panel.parentElement.removeChild(panel);
-    if (parentEl && parentOrigPos !== undefined && parentEl.style.position === 'relative') {
+    if (parentEl && parentEl.style.position === 'relative') {
       parentEl.style.position = parentOrigPos;
     }
     if (window.__srtInjector && window.__srtInjector.destroy === destroy) {
@@ -483,25 +685,25 @@
   }
   closeBtn.onclick = destroy;
 
-  function onFs() { attachOverlay(); }
+  function onFs() { if (running) attachOverlay(); }   // chỉ gắn lại khi đang chạy
   document.addEventListener('fullscreenchange', onFs);
 
   window.__srtInjector = {
     destroy,
+    start: () => startBtn.onclick(),
+    stop: stopRunning,
     setVideo,
     refreshVideoList,
     loadText,
     get cues() { return cues; },
     get video() { return video; },
+    get running() { return running; },
   };
 
-  /* ---------- Khởi động ---------- */
+  /* ---------- Khởi động: chỉ hiện bảng, chưa quét, chưa chạy gì ---------- */
   document.body.appendChild(panel);
-  refreshVideoList();
-  if (video) setStatus('');
-  else setStatus('Chưa thấy video — mở video rồi bấm "Quét lại".');
-  updateStatus();
-  rafId = requestAnimationFrame(tick);
-  console.log('%c[SRT Injector] đã chạy. Chọn file .srt trong bảng điều khiển góc phải.',
+  loadSavedFile();   // nạp file .srt đã lưu sẵn (nếu có) — chưa chạy phụ đề
+  updateStatus(true);
+  console.log('%c[SRT Injector] đã sẵn sàng. Chọn file .srt (chỉ cần 1 lần, sẽ lưu sẵn) rồi bấm Bắt đầu.',
     'color:#0ea5a4;font-weight:bold;');
 })();
