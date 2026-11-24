@@ -23,7 +23,8 @@
  *
  * VIDEO NẰM TRONG IFRAME (player nhúng kiểu <div id="player-wrapper"><iframe ...>):
  *   Trang chính không đọc được giờ phát của video trong iframe khác origin,
- *   nên tool tự nhận diện và chỉ hiện nút "Mở tab player" trong bảng:
+ *   nên tool tự nhận diện và chỉ hiện nút "Mở tab player" trong bảng
+ *   (kề bên nút "Quét lại" — dò video thủ công):
  *   Cách 1 (nhanh nhất): bấm "Mở tab player" — mở tab mới chỉ có player,
  *   dán lại lệnh 1 dòng trong tab đó là chạy (video thành top-level).
  *   Cách 2: trong DevTools, bấm khung "top" phía trên console -> chọn iframe
@@ -859,7 +860,7 @@
   panel.appendChild(header);
 
   const body = document.createElement('div');
-  body.style.cssText = 'padding:4px 12px 12px;';
+  body.style.cssText = 'padding:4px 12px 12px;max-height:calc(100vh - 70px);overflow-y:auto;';   // bảng dài hơn màn hình thì lướt trong bảng (tiêu đề vẫn đứng yên)
   panel.appendChild(body);
 
   // Kéo thả panel bằng tiêu đề
@@ -889,18 +890,21 @@
   startRow.append(startBtn, stopBtn);
   body.appendChild(startRow);
 
-  // Nút "Mở tab player" — chỉ hiện khi video nằm trong iframe (không còn bảng vàng giải thích)
-  const noticeBox = document.createElement('div');
-  noticeBox.style.cssText = 'display:none;margin:4px 0;';
+  // Hàng nút: "Mở tab player" (chỉ hiện khi video nằm trong iframe) kề bên
+  // nút "Quét lại" (dò video thủ công) — 2 nút hay dùng nằm cùng 1 chỗ
+  const playerRow = document.createElement('div');
+  playerRow.style.cssText = 'display:flex;gap:8px;margin:4px 0;';
   const openPlayerBtn = mkBtn('Mở tab player', '#16a34a');
-  noticeBox.appendChild(openPlayerBtn);
-  body.appendChild(noticeBox);
+  openPlayerBtn.style.display = 'none';
+  const rescanBtn = mkBtn('Quét lại');
+  playerRow.append(openPlayerBtn, rescanBtn);
+  body.appendChild(playerRow);
   let noticePlayer = null;
   function showPlayerNotice(players) {
     noticePlayer = players[0];
-    noticeBox.style.display = '';
+    openPlayerBtn.style.display = '';
   }
-  function hidePlayerNotice() { noticeBox.style.display = 'none'; }
+  function hidePlayerNotice() { openPlayerBtn.style.display = 'none'; }
   openPlayerBtn.onclick = () => {
     if (noticePlayer && noticePlayer.url) (origOpen || window.open).call(window, noticePlayer.url, '_blank');   // dùng window.open gốc để không bị chặn quảng cáo chặn luôn
   };
@@ -942,7 +946,6 @@
     const list = findVideos();
     if (list[+videoSel.value]) setVideo(list[+videoSel.value]);
   };
-  const rescanBtn = mkBtn('Quét lại');
   rescanBtn.onclick = () => {
     const list = refreshVideoList();
     if (list.length) {
@@ -955,9 +958,6 @@
     updateStatus();
   };
   const videoRow = row('Video', videoSel);
-  const rescanWrap = document.createElement('span');
-  rescanWrap.appendChild(rescanBtn);
-  videoRow.appendChild(rescanWrap);
   body.appendChild(videoRow);
 
   // Hàng: chọn file .srt (lưu sẵn trong máy)
