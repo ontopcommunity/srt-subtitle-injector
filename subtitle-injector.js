@@ -26,16 +26,21 @@
  *   - Dòng trạng thái chỉ cập nhật tối đa 1 lần/giây.
  *
  * VIDEO NẰM TRONG IFRAME (player nhúng kiểu <div id="player-wrapper"><iframe ...>):
- *   Trang chính không đọc được giờ phát của video trong iframe khác origin.
- *   Nút "Quét lại" quét HẾT iframe còn hiện trên trang (chỉ bỏ khung 0×0)
- *   rồi xếp hạng theo độ giống player — đảm bảo quét ra được; dropdown
+ *   Trang chính không đọc được giờ phát của video trong iframe khác origin,
+ *   và player cũng không gửi giờ ra ngoài (đã đọc code player JW 8.38.10:
+ *   không có postMessage nào) — nên phụ đề KHÔNG chèn vào trong iframe mà
+ *   là lớp nằm TRÊN khung player ở trang chính, chạy theo đồng hồ riêng:
+ *   bấm Bắt đầu cùng lúc bấm play trên video, lệch thì chỉnh ±1s/±5s
+ *   (hàng "Đồng hồ" trong bảng), Dừng thì đồng hồ đứng theo, chạy lại thì
+ *   tiếp tục từ chỗ cũ. Nút "Quét lại" quét HẾT iframe còn hiện trên trang
+ *   (chỉ bỏ khung 0×0) rồi xếp hạng theo độ giống player; dropdown
  *   "Video/Khung" liệt kê cả video trực tiếp lẫn các khung (Khung 1, 2...),
- *   nhiều cái thì chọn trong đó, khung giống player nhất lên đầu. Chọn 1
- *   khung thì nút "Mở tab player" (kề bên nút "Quét lại") mở đúng khung đó:
- *   Cách 1 (nhanh nhất): bấm "Mở tab player" — mở tab mới chỉ có player,
- *   dán lại lệnh 1 dòng trong tab đó là chạy (video thành top-level).
- *   Cách 2: trong DevTools, bấm khung "top" phía trên console -> chọn iframe
- *   của player -> dán lại lệnh 1 dòng. File .srt lưu theo host của player.
+ *   nhiều cái thì chọn trong đó, khung giống player nhất lên đầu.
+ *   Muốn đồng bộ chính xác tuyệt đối thì bấm "Mở tab player" (kề bên nút
+ *   "Quét lại") — mở tab mới chỉ có player, dán lại lệnh 1 dòng trong tab
+ *   đó là chạy (video thành top-level); hoặc trong DevTools bấm khung "top"
+ *   phía trên console -> chọn iframe của player -> dán lại lệnh 1 dòng.
+ *   File .srt lưu theo host của player.
  *
  * XEM DỌC (tự động khi chạy lệnh / khi bấm Bắt đầu, tắt được trong bảng):
  *   Video được phóng to lấp màn hình DỌC, vẫn ở nguyên trang web (không
@@ -220,6 +225,17 @@
   let lastIdx = -1;          // cue đang hiển thị
   let running = false;       // đã bấm Bắt đầu hay chưa
   let scanning = false;      // đang quét tìm video (nút hiện "Đang quét…")
+  // Chế độ khung player (không có video trực tiếp): phụ đề là lớp nằm TRÊN
+  // khung iframe ở trang chính, chạy theo đồng hồ riêng — player không gửi
+  // giờ phát ra ngoài (đã kiểm tra code player JW 8.38.10: không có
+  // postMessage nào), nên đồng hồ phải bấm Bắt đầu cùng lúc bấm play,
+  // lệch thì chỉnh tay bằng nút ±1s/±5s.
+  let iframeMode = false;   // đang chạy phụ đề trên khung player (không video)
+  let clockBase = 0;        // mốc giờ phụ đề (giây) lúc đồng hồ chạy lại
+  let clockT0 = 0;          // performance.now() lúc đồng hồ chạy lại
+  let clockFrozen = null;   // null = đồng hồ đang chạy; số = giờ đang đứng yên
+  let clockTimer = null;    // interval 250ms — CHỈ chạy ở chế độ khung player
+  let lastFrameRect = '';   // rect khung lần cuối gắn lớp phủ (khỏi ghi DOM thừa)
   let destroyed = false;
   let scanTimer = 0;         // timer quét thử lại (tối đa vài lần rồi dừng hẳn)
   let scanLeft = 0;
@@ -307,25 +323,90 @@
     return -1;
   }
 
+  // Giờ phát hiện tại: video trực tiếp thì lấy giờ thật của video;
+  // khung player thì lấy đồng hồ riêng (bấm Bắt đầu cùng lúc bấm play).
+  function getTime() {
+    if (video) return video.currentTime;
+    if (clockFrozen !== null) return clockFrozen;
+    return clockBase + (performance.now() - clockT0) / 1000;
+  }
+  function clockStart(fromT) {
+    clockBase = fromT;
+    clockT0 = performance.now();
+    clockFrozen = null;
+  }
+  function clockReset() { clockBase = 0; clockT0 = performance.now(); clockFrozen = null; }
+  function clockFreeze() {
+    if (clockFrozen === null) clockFrozen = getTime();
+  }
+  function clockNudge(d) {
+    const t = Math.max(0, getTime() + d);
+    if (clockFrozen !== null) clockFrozen = t;
+    else { clockBase = t; clockT0 = performance.now(); }
+    lastIdx = -1;
+    updateSub();
+    updateSyncRow();
+  }
+  function fmtTime(t) {
+    t = Math.max(0, t || 0);
+    const m = Math.floor(t / 60), s = Math.floor(t % 60);
+    return m + ':' + String(s).padStart(2, '0');
+  }
+
+  // Gắn lớp phủ lên TRÊN khung iframe (ở trang chính, không vào trong iframe):
+  // lớp phủ nằm trong thẻ cha của khung, đúng bằng khung hình của khung.
+  // Theo khung khi cuộn trang (cùng thẻ cha nên tự đi theo); đổi cỡ thì tính
+  // lại ở nhịp đồng hồ + khi resize (chỉ ghi DOM khi rect thật sự đổi).
+  function positionIframeOverlay(frameEl) {
+    if (!frameEl || portrait) return false;
+    const host = frameEl.parentElement || document.body;
+    if (overlay.parentElement !== host) {
+      if (overlay.parentElement) overlay.parentElement.removeChild(overlay);
+      parentEl = host;
+      const cs = getComputedStyle(host);
+      if (cs.position === 'static') {
+        parentOrigPos = host.style.position || '';
+        host.style.position = 'relative';
+      }
+      host.appendChild(overlay);
+    }
+    const r = frameEl.getBoundingClientRect();
+    const pr = host.getBoundingClientRect();
+    const key = [r.left - pr.left, r.top - pr.top, r.width, r.height].map(Math.round).join(',');
+    if (key === lastFrameRect) return true;
+    lastFrameRect = key;
+    Object.assign(overlay.style, {
+      position: 'absolute',
+      left: Math.round(r.left - pr.left) + 'px',
+      top: Math.round(r.top - pr.top) + 'px',
+      right: 'auto', bottom: 'auto',
+      width: Math.round(r.width) + 'px', height: Math.round(r.height) + 'px',
+      transform: '',
+    });
+    return true;
+  }
+  function attachIframeOverlay(frameEl) { lastFrameRect = ''; return positionIframeOverlay(frameEl); }
+
   // Chỉ ghi DOM khi câu phụ đề thật sự đổi — tua đến đâu bay đến đó ngay.
   function updateSub() {
-    if (destroyed || !running || !video) return;
+    if (destroyed || !running || (!video && !iframeMode)) return;
     if (!cues.length || !settings.show) {
       if (subEl.style.display !== 'none') subEl.style.display = 'none';
       updateStatus();
       return;
     }
-    const t = video.currentTime + settings.offsetSec;
+    const t = getTime() + settings.offsetSec;
     const idx = currentCue(t);
     if (idx !== lastIdx) {
       lastIdx = idx;
       if (idx >= 0) {
         subEl.innerHTML = cues[idx].html;
         subEl.style.display = 'block';
-      } else {
-        subEl.style.display = 'none';
       }
     }
+    // Không có câu nào ở giờ này thì phải ẩn chữ cũ đi (kể cả khi lastIdx
+    // vừa bị đặt lại -1 trước đó, lúc đó nhánh trên không ghi DOM).
+    if (idx === -1 && subEl.style.display !== 'none') subEl.style.display = 'none';
     updateStatus();
   }
 
@@ -506,6 +587,7 @@
     if (exitBtnEl && exitBtnEl.parentElement) exitBtnEl.parentElement.removeChild(exitBtnEl);
     resetOverlayStyle();
     if (running && video) attachOverlay();
+    else if (running && iframeMode && pickedIframe) attachIframeOverlay(pickedIframe);
     else if (overlay.parentElement) overlay.parentElement.removeChild(overlay);
     updatePortraitBtn();
   }
@@ -647,7 +729,8 @@
     try { host = new URL(src, location.href).host; } catch (_) {}
     savePicked({ type: 'iframe', src, host });
     pickedIframe = el;
-    setStatus('Đã lưu khung player (' + (host || 'iframe') + ') — phụ đề cần chạy lệnh trong khung player (xem hướng dẫn trong bảng).');
+    clockReset();   // đổi khung = video khác, đồng hồ về 0
+    setStatus('Đã lưu khung player (' + (host || 'iframe') + ') — bấm Bắt đầu để chạy phụ đề trên khung (theo đồng hồ).');
     if (settings.autoPortrait) enterPortrait();
   }
   function pickElement(el) {
@@ -996,6 +1079,31 @@
     }
   }
 
+  // Hàng đồng bộ đồng hồ (chỉ hiện khi chạy phụ đề trên khung player):
+  // hiện giờ đồng hồ + nút chỉnh ±1s/±5s để khớp lại với video khi lệch.
+  const syncRow = document.createElement('div');
+  syncRow.style.cssText = 'display:none;gap:6px;align-items:center;margin:6px 0;flex-wrap:wrap;';
+  const syncTime = document.createElement('span');
+  syncTime.style.cssText = 'font-weight:bold;font-size:13px;color:#7dd3d2;min-width:52px;';
+  syncTime.textContent = '0:00';
+  function mkNudge(label, d) {
+    const b = mkBtn(label, '#333');
+    b.style.cssText += 'padding:5px 9px;font-size:12px;';
+    b.onclick = () => clockNudge(d);
+    return b;
+  }
+  const syncReset = mkBtn('↺ 0:00', '#333');
+  syncReset.style.cssText += 'padding:5px 9px;font-size:12px;';
+  syncReset.onclick = () => { clockStart(0); lastIdx = -1; updateSub(); updateSyncRow(); };
+  syncRow.append(document.createTextNode('Đồng hồ:'), syncTime,
+    mkNudge('−5s', -5), mkNudge('−1s', -1), mkNudge('+1s', 1), mkNudge('+5s', 5), syncReset);
+  body.appendChild(syncRow);
+  function updateSyncRow() {
+    const show = iframeMode && running;
+    syncRow.style.display = show ? 'flex' : 'none';
+    if (show) syncTime.textContent = fmtTime(getTime());
+  }
+
   // Hàng nút: "Mở tab player" (chỉ hiện khi video nằm trong iframe) kề bên
   // nút "Quét lại" (dò video thủ công) — 2 nút hay dùng nằm cùng 1 chỗ
   const playerRow = document.createElement('div');
@@ -1315,11 +1423,13 @@
     if (!statusEl.isConnected) return;
     const now = Date.now();
     if (!force && now - lastStatusWrite < 1000) return;   // throttle 1s
-    const vt = video ? video.currentTime.toFixed(1) + 's' : '—';
+    const hasT = video || (running && iframeMode);
+    const vt = hasT ? getTime().toFixed(1) + 's' : '—';
+    const label = video ? 'Video' : 'Đồng hồ';
     const str = statusText
-      ? statusText + (video ? ` | Video: ${vt}` : '')
+      ? statusText + (hasT ? ` | ${label}: ${vt}` : '')
       : (running
-        ? `Đang chạy | Video: ${vt} | ${cues.length} câu phụ đề`
+        ? `Đang chạy | ${label}: ${vt} | ${cues.length} câu phụ đề`
         : (video ? `Video: ${vt} | ${cues.length ? cues.length + ' câu phụ đề' : 'Chưa có phụ đề'}` : 'Chưa chạy — bấm "Bắt đầu".'));
     if (str === lastStatusStr) return;
     lastStatusStr = str;
@@ -1335,6 +1445,7 @@
       setStatus('File không đọc được câu nào — kiểm tra lại định dạng .srt.');
       return false;
     }
+    clockReset();   // phụ đề mới = video mới, đồng hồ về 0
     savedName = name;
     if (saveIt !== false) {
       if (text.length > FILE_MAX) {
@@ -1392,7 +1503,7 @@
     if (players.length) {
       showPlayerNotice(players);
       if (settings.autoPortrait) enterPortrait();   // phóng to dọc ngay trên iframe player
-      setStatus('Video nằm trong iframe — xem hướng dẫn trong bảng.');
+      setStatus('Video nằm trong iframe — chọn khung trong dropdown rồi bấm Bắt đầu (phụ đề chạy trên khung theo đồng hồ).');
     } else {
       setStatus('Không thấy video nào — mở video rồi bấm Bắt đầu lại.');
     }
@@ -1403,18 +1514,42 @@
   function startRunning() {
     running = true;
     scanning = false;
+    iframeMode = !video && !!pickedIframe;
     hidePlayerNotice();
     updateToggleBtn();
-    if (video) attachVideoListeners(video);
+    if (video) {
+      attachVideoListeners(video);
+    } else if (iframeMode) {
+      // Lớp phụ đề nằm TRÊN khung player ở trang chính, chạy theo đồng hồ.
+      clockStart(clockFrozen !== null ? clockFrozen : 0);   // dừng rồi chạy lại thì tiếp tục từ chỗ cũ
+      attachIframeOverlay(pickedIframe);
+      clearInterval(clockTimer);
+      clockTimer = setInterval(() => {
+        if (!running || !iframeMode || destroyed) return;
+        if (!portrait) positionIframeOverlay(pickedIframe);
+        updateSub();
+        updateSyncRow();
+      }, 250);   // chỉ chế độ khung player mới cần nhịp (không có sự kiện video)
+      window.addEventListener('resize', onFrameResize);
+    }
     if (settings.turbo) applyTurbo(true);
     if (settings.autoPortrait) enterPortrait();
     updateSub();   // hiện đúng câu tại thời điểm hiện tại ngay
-    setStatus('Đang chạy — phụ đề theo video.');
+    setStatus(iframeMode
+      ? 'Đang chạy — phụ đề nằm trên khung player, theo đồng hồ. Bấm Bắt đầu cùng lúc bấm play; lệch thì chỉnh ±1s/±5s bên dưới.'
+      : 'Đang chạy — phụ đề theo video.');
     updatePortraitBtn();
+    updateSyncRow();
   }
+  function onFrameResize() { if (running && iframeMode && !portrait) positionIframeOverlay(pickedIframe); }
 
   function stopRunning() {
     clearTimeout(scanTimer);
+    clearInterval(clockTimer);
+    clockTimer = null;
+    window.removeEventListener('resize', onFrameResize);
+    if (iframeMode) clockFreeze();   // đứng yên ở giờ hiện tại, chạy lại thì tiếp tục
+    iframeMode = false;
     running = false;
     scanning = false;
     if (video) detachVideoListeners(video);
@@ -1422,6 +1557,7 @@
     if (overlay.parentElement) overlay.parentElement.removeChild(overlay);
     subEl.style.display = 'none';
     updateToggleBtn();
+    updateSyncRow();
     setStatus('Đã dừng.');
   }
 
@@ -1478,7 +1614,14 @@
       const frame = (sel && sel.kind === 'iframe') ? sel
         : (pickedIframe ? { el: pickedIframe } : null);
       const players = frame ? [frame] : findPlayerIframes(1);
-      if (players.length && fromUserGesture) { openPlayerTab(players[0]); return; }
+      // Đã chọn khung player: chạy phụ đề NGAY Ở TRANG CHÍNH, lớp nằm trên
+      // khung, theo đồng hồ (chỉ khi bấm thật — đồng hồ phải bấm cùng lúc play).
+      if (players.length && fromUserGesture) {
+        pickedIframe = players[0].el;
+        savePicked({ type: 'iframe', src: pickedIframe.getAttribute('src') || '', host: players[0].host || '' });
+        startRunning();
+        return;
+      }
     }
     scanning = true;
     updateToggleBtn();
@@ -1522,6 +1665,8 @@
     get cues() { return cues; },
     get video() { return video; },
     get running() { return running; },
+    get time() { return getTime(); },
+    get iframeMode() { return iframeMode; },
   };
 
   /* ---------- Khởi động ---------- */
