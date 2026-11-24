@@ -8,8 +8,12 @@
  * LUỒNG MỚI:
  *   1. Chọn file .srt 1 lần — file được LƯU SẴN trong máy (localStorage),
  *      lần sau chạy lệnh là có sẵn, không cần chọn lại.
- *   2. Bấm "▶ Bắt đầu" — tool quét video đang chạy 1 lần duy nhất, chèn
- *      phụ đề vào rồi NGỪNG QUÉT hẳn (không còn vòng lặp nào chạy nền).
+ *   2. Bấm "▶ Bắt đầu" (1 nút đổi trạng thái: chạy rồi thành "⏸ Dừng") —
+ *      tool quét video đang chạy 1 lần duy nhất, chèn phụ đề vào rồi NGỪNG
+ *      QUÉT hẳn (không còn vòng lặp nào chạy nền). Chưa có phụ đề thì bấm
+ *      không chạy mà bảng báo rõ + cuộn tới khung tìm phụ đề. Đã chọn khung
+ *      iframe mà không có video trực tiếp thì bấm Bắt đầu sẽ mở tab player
+ *      + chép sẵn lệnh để dán vào tab mới (phụ đề phải tìm lại ở tab mới).
  *   3. Phụ đề đồng bộ theo sự kiện của video (timeupdate/seeked), không dùng
  *      requestAnimationFrame: tua đến đâu phụ đề bay đến đó ngay lập tức,
  *      kể cả bấm sang mốc thời gian khác trong video.
@@ -215,6 +219,7 @@
   let savedName = '';
   let lastIdx = -1;          // cue đang hiển thị
   let running = false;       // đã bấm Bắt đầu hay chưa
+  let scanning = false;      // đang quét tìm video (nút hiện "Đang quét…")
   let destroyed = false;
   let scanTimer = 0;         // timer quét thử lại (tối đa vài lần rồi dừng hẳn)
   let scanLeft = 0;
@@ -885,7 +890,7 @@
     catStatus.textContent = 'Đã tải ' + l.name + ' (' + cues.length + ' câu) — đang dùng luôn.';
     if (!running) {
       if (video) startRunning();
-      else startBtn.onclick();
+      else requestStart(false);
     }
   }
   function fileNameFromUrl(u) {
@@ -967,16 +972,29 @@
 
   minBtn.onclick = () => (body.style.display = body.style.display === 'none' ? '' : 'none');
 
-  // Hàng: Bắt đầu / Dừng
-  const startBtn = mkBtn('▶ Bắt đầu', '#16a34a');
-  startBtn.style.cssText += 'flex:1;padding:8px;font-size:14px;font-weight:bold;';
-  const stopBtn = mkBtn('⏸ Dừng', '#555');
-  stopBtn.style.cssText += 'flex:1;padding:8px;font-size:14px;';
-  stopBtn.disabled = true;
+  // Nút Bắt đầu / Dừng là MỘT nút đổi trạng thái (không tách 2 nút):
+  // chưa chạy -> "▶ Bắt đầu", đang chạy -> "⏸ Dừng", đang quét -> "Đang quét…"
+  const toggleBtn = mkBtn('▶ Bắt đầu', '#16a34a');
+  toggleBtn.style.cssText += 'flex:1;padding:8px;font-size:14px;font-weight:bold;';
   const startRow = document.createElement('div');
   startRow.style.cssText = 'display:flex;gap:8px;margin:10px 0 4px;';
-  startRow.append(startBtn, stopBtn);
+  startRow.append(toggleBtn);
   body.appendChild(startRow);
+  function updateToggleBtn() {
+    if (running) {
+      toggleBtn.textContent = '⏸ Dừng';
+      toggleBtn.style.background = '#555';
+      toggleBtn.disabled = false;
+    } else if (scanning) {
+      toggleBtn.textContent = 'Đang quét…';
+      toggleBtn.style.background = '#555';
+      toggleBtn.disabled = true;
+    } else {
+      toggleBtn.textContent = '▶ Bắt đầu';
+      toggleBtn.style.background = '#16a34a';
+      toggleBtn.disabled = false;
+    }
+  }
 
   // Hàng nút: "Mở tab player" (chỉ hiện khi video nằm trong iframe) kề bên
   // nút "Quét lại" (dò video thủ công) — 2 nút hay dùng nằm cùng 1 chỗ
@@ -1378,14 +1396,15 @@
     } else {
       setStatus('Không thấy video nào — mở video rồi bấm Bắt đầu lại.');
     }
-    startBtn.disabled = false;
+    scanning = false;
+    updateToggleBtn();
   }
 
   function startRunning() {
     running = true;
+    scanning = false;
     hidePlayerNotice();
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
+    updateToggleBtn();
     if (video) attachVideoListeners(video);
     if (settings.turbo) applyTurbo(true);
     if (settings.autoPortrait) enterPortrait();
@@ -1394,29 +1413,79 @@
     updatePortraitBtn();
   }
 
-  startBtn.onclick = () => {
-    if (running) return;
-    if (!cues.length) {
-      setStatus('Chưa có phụ đề — chọn file .srt trước đã.');
-      return;
-    }
-    startBtn.disabled = true;
-    scanLeft = 8;   // quét tối đa ~4 giây rồi dừng hẳn
-    scanAndStart();
-  };
-
   function stopRunning() {
     clearTimeout(scanTimer);
     running = false;
+    scanning = false;
     if (video) detachVideoListeners(video);
     applyTurbo(false);
     if (overlay.parentElement) overlay.parentElement.removeChild(overlay);
     subEl.style.display = 'none';
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
+    updateToggleBtn();
     setStatus('Đã dừng.');
   }
-  stopBtn.onclick = stopRunning;
+
+  // Chép lệnh 1 dòng vào clipboard (để dán vào console tab player mới)
+  async function copyLoader() {
+    try { await navigator.clipboard.writeText(LOADER); return true; }
+    catch (_) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = LOADER;
+        ta.style.cssText = 'position:fixed;opacity:0;';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        return !!ok;
+      } catch (_) { return false; }
+    }
+  }
+  // Mở khung player ra tab mới + chép sẵn lệnh (chỉ gọi trong cú bấm của user
+  // thì trình duyệt mới cho mở tab). Phụ đề đã tải ở trang này không sang
+  // tab mới được (localStorage khác origin) nên phải tìm lại ở tab mới.
+  function openPlayerTab(p) {
+    const el = p.el;
+    let url = p.url || '';
+    if (!url && el) {
+      const s = el.getAttribute('src') || '';
+      try { url = new URL(s, location.href).href; } catch (_) {}
+    }
+    if (url) (origOpen || window.open).call(window, url, '_blank');
+    showPlayerNotice([{ el, url }]);
+    copyLoader().then(ok => setStatus(ok
+      ? 'Đã mở tab player + chép lệnh — sang tab mới, dán lệnh vào console rồi bấm Bắt đầu. (Phụ đề ở trang này không sang tab mới được — tìm lại ở tab mới.)'
+      : 'Đã mở tab player — sang tab mới, dán lệnh 1 dòng vào console rồi bấm Bắt đầu.'));
+  }
+  // Cuộn tới khung tìm phụ đề + focus ô gõ (khi bấm Bắt đầu mà chưa có phụ đề)
+  function focusSubSearch() {
+    try { catBox.scrollIntoView({ block: 'nearest' }); catInput.focus(); } catch (_) {}
+  }
+  // Bấm nút Bắt đầu/Dừng (1 nút đổi trạng thái). fromUserGesture=true chỉ khi
+  // gọi từ cú bấm thật — khi đó mới được mở tab player (trình duyệt chặn
+  // popup nếu mở ngoài cử chỉ). Gọi tự động (tải xong phụ đề, chạy lại lệnh)
+  // thì đi đường quét bình thường, không tự mở tab.
+  function requestStart(fromUserGesture) {
+    if (running) { stopRunning(); return; }
+    if (scanning) return;
+    if (!cues.length) {
+      setStatus('Chưa có phụ đề — chọn file .srt hoặc tìm trên SubtitleCat bên dưới.');
+      focusSubSearch();
+      return;
+    }
+    if (!video && !findVideos().length) {
+      const sel = scanList[+videoSel.value];
+      const frame = (sel && sel.kind === 'iframe') ? sel
+        : (pickedIframe ? { el: pickedIframe } : null);
+      const players = frame ? [frame] : findPlayerIframes(1);
+      if (players.length && fromUserGesture) { openPlayerTab(players[0]); return; }
+    }
+    scanning = true;
+    updateToggleBtn();
+    scanLeft = 8;   // quét tối đa ~4 giây rồi dừng hẳn
+    scanAndStart();
+  }
+  toggleBtn.onclick = () => requestStart(true);
 
   /* ---------- Gỡ bỏ sạch ---------- */
   function destroy() {
@@ -1445,7 +1514,7 @@
 
   window.__srtInjector = {
     destroy,
-    start: () => startBtn.onclick(),
+    start: () => requestStart(false),
     stop: stopRunning,
     setVideo,
     refreshVideoList,
@@ -1470,7 +1539,7 @@
   // Tự động khi chạy lệnh: có file lưu sẵn thì chạy phụ đề luôn; luôn thử phóng to dọc.
   if (cues.length) {
     if (video) startRunning();
-    else startBtn.onclick();
+    else requestStart(false);
   } else if (settings.autoPortrait) {
     portraitLeft = 8;   // thử tối đa ~4 giây rồi dừng hẳn
     tryAutoPortrait();
