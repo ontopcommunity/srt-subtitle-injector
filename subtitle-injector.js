@@ -21,6 +21,14 @@
  *   - Đóng băng hiệu ứng animation/transition của trang (video không ảnh hưởng).
  *   - Dòng trạng thái chỉ cập nhật tối đa 1 lần/giây.
  *
+ * VIDEO NẰM TRONG IFRAME (player nhúng kiểu <div id="player-wrapper"><iframe ...>):
+ *   Trang chính không đọc được giờ phát của video trong iframe khác origin,
+ *   nên tool tự nhận diện và hiện hướng dẫn trong bảng:
+ *   Cách 1 (nhanh nhất): bấm "Mở tab player" — mở tab mới chỉ có player,
+ *   dán lại lệnh 1 dòng trong tab đó là chạy (video thành top-level).
+ *   Cách 2: trong DevTools, bấm khung "top" phía trên console -> chọn iframe
+ *   của player -> dán lại lệnh 1 dòng. File .srt lưu theo host của player.
+ *
  * Chạy lại lệnh bất cứ lúc nào để reset sạch (bản cũ tự gỡ trước khi chạy mới).
  * Không gửi dữ liệu đi đâu. Cài đặt + file .srt lưu trong localStorage.
  * ========================================================================== */
@@ -46,6 +54,10 @@
     show: true,
     turbo: true,         // chế độ siêu tối ưu
   };
+
+  // Lệnh 1 dòng để chạy lại tool (dùng cho nút "Sao chép lệnh")
+  const LOADER = "fetch('https://raw.githubusercontent.com/ontopcommunity/srt-subtitle-injector/main/subtitle-injector.js').then(r=>r.text()).then(t=>eval(t))";
+  const IN_IFRAME = window.self !== window.top;   // đang chạy trong iframe hay trang chính
 
   /* ---------- Đọc / lưu cài đặt ---------- */
   let settings = { ...DEFAULTS };
@@ -73,6 +85,10 @@
     t = t.replace(/&lt;font\s+color=["']?([^"'&; ]+)["']?&gt;/gi, '<span style="color:$1">');
     t = t.replace(/&lt;\/font&gt;/gi, '</span>');
     return t;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   // Trả về mảng [{ start, end, html }] đã sắp xếp theo thời gian
@@ -112,6 +128,31 @@
       const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
       return (rb.width * rb.height) - (ra.width * ra.height);
     })[0];
+  }
+
+  // Tìm iframe giống player (video nhúng kiểu <div id="player-wrapper"><iframe ...>).
+  // Trang chính không đọc được nội dung iframe khác origin, nên chỉ nhận diện
+  // để hướng dẫn user chạy tool TRONG iframe (hoặc mở player ra tab mới).
+  function findPlayerIframes() {
+    const out = [];
+    document.querySelectorAll('iframe').forEach(f => {
+      const r = f.getBoundingClientRect();
+      if (r.width < 120 || r.height < 90) return;   // bỏ iframe nhỏ (quảng cáo, tracking)
+      const wrap = f.closest('[id*="player"], [class*="player"], [id*="video"], [class*="video"]');
+      const src = f.getAttribute('src') || '';
+      let host = '', url = src;
+      try {
+        const u = new URL(src, location.href);
+        host = u.hostname;
+        url = u.href;
+      } catch (e) { /* kệ */ }
+      let score = 0;
+      if (wrap) score += 2;                                            // nằm trong khối player
+      if (/play|embed|video|player|stream/i.test(src)) score += 1;     // link kiểu player
+      if (r.width >= 480 && r.height >= 270) score += 1;              // đủ lớn để xem
+      out.push({ el: f, src, url, host, score, w: Math.round(r.width), h: Math.round(r.height) });
+    });
+    return out.sort((a, b) => b.score - a.score);
   }
 
   /* ---------- State ---------- */
@@ -312,7 +353,7 @@
 
   const header = document.createElement('div');
   header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:9px 12px;cursor:move;border-bottom:1px solid #2a2a2a;font-weight:bold;';
-  header.innerHTML = '<span>🎬 Phụ đề SRT</span>';
+  header.innerHTML = '<span>🎬 Phụ đề SRT' + (IN_IFRAME ? ' — trong iframe' : '') + '</span>';
   const headerBtns = document.createElement('span');
   const minBtn = document.createElement('button');
   minBtn.textContent = '—';
@@ -354,6 +395,44 @@
   startRow.append(startBtn, stopBtn);
   body.appendChild(startRow);
 
+  // Hộp hướng dẫn khi video nằm trong iframe (trang chính không đọc được giờ phát)
+  const noticeBox = document.createElement('div');
+  noticeBox.style.cssText = 'display:none;background:#3a2f00;border:1px solid #a88400;border-radius:8px;padding:10px;margin:8px 0;color:#ffe9a8;font-size:12px;line-height:1.6;';
+  const noticeText = document.createElement('div');
+  noticeBox.appendChild(noticeText);
+  const noticeBtns = document.createElement('div');
+  noticeBtns.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
+  const openPlayerBtn = mkBtn('Mở tab player', '#16a34a');
+  const copyCmdBtn = mkBtn('Sao chép lệnh', '#555');
+  noticeBtns.append(openPlayerBtn, copyCmdBtn);
+  noticeBox.appendChild(noticeBtns);
+  body.appendChild(noticeBox);
+  let noticePlayer = null;
+  function showPlayerNotice(players) {
+    noticePlayer = players[0];
+    noticeText.innerHTML = '⚠ Video nằm trong <b>iframe</b> (' + escapeHtml(noticePlayer.host || 'player') + ', ' + noticePlayer.w + '×' + noticePlayer.h + ') — trang chính không đọc được giờ phát nên không chèn trực tiếp được.<br><b>Cách 1:</b> bấm "Mở tab player" rồi dán lại lệnh 1 dòng trong tab mới.<br><b>Cách 2:</b> trong DevTools, bấm khung "top" trên console → chọn iframe ' + escapeHtml(noticePlayer.host || '') + ' → dán lại lệnh.<br>File .srt lưu theo host của player — chọn 1 lần cho mỗi host là xong.';
+    noticeBox.style.display = '';
+  }
+  function hidePlayerNotice() { noticeBox.style.display = 'none'; }
+  openPlayerBtn.onclick = () => {
+    if (noticePlayer && noticePlayer.url) window.open(noticePlayer.url, '_blank');
+  };
+  copyCmdBtn.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(LOADER);
+      copyCmdBtn.textContent = 'Đã chép!';
+    } catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = LOADER;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); copyCmdBtn.textContent = 'Đã chép!'; }
+      catch (e2) { copyCmdBtn.textContent = 'Chép tay vậy'; }
+      ta.remove();
+    }
+    setTimeout(() => (copyCmdBtn.textContent = 'Sao chép lệnh'), 1500);
+  };
+
   // Hàng: chọn video (nếu trang có nhiều video)
   const videoSel = document.createElement('select');
   videoSel.style.cssText = 'flex:1;min-width:0;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:5px 7px;';
@@ -392,7 +471,13 @@
   const rescanBtn = mkBtn('Quét lại');
   rescanBtn.onclick = () => {
     const list = refreshVideoList();
-    if (list.length) setVideo(list[+videoSel.value || 0]);
+    if (list.length) {
+      setVideo(list[+videoSel.value || 0]);
+      hidePlayerNotice();
+    } else {
+      const players = findPlayerIframes();
+      if (players.length) showPlayerNotice(players);
+    }
     updateStatus();
   };
   const videoRow = row('Video', videoSel);
@@ -631,12 +716,19 @@
       scanTimer = setTimeout(scanAndStart, 500);
       return;
     }
-    setStatus('Không thấy video nào — mở video rồi bấm Bắt đầu lại.');
+    const players = findPlayerIframes();
+    if (players.length) {
+      showPlayerNotice(players);
+      setStatus('Video nằm trong iframe — xem hướng dẫn trong bảng.');
+    } else {
+      setStatus('Không thấy video nào — mở video rồi bấm Bắt đầu lại.');
+    }
     startBtn.disabled = false;
   }
 
   function startRunning() {
     running = true;
+    hidePlayerNotice();
     startBtn.disabled = true;
     stopBtn.disabled = false;
     if (video) attachVideoListeners(video);
@@ -703,6 +795,11 @@
   /* ---------- Khởi động: chỉ hiện bảng, chưa quét, chưa chạy gì ---------- */
   document.body.appendChild(panel);
   loadSavedFile();   // nạp file .srt đã lưu sẵn (nếu có) — chưa chạy phụ đề
+  // Nếu trang không có video trực tiếp mà có iframe player thì hiện hướng dẫn ngay.
+  if (!findVideos().length) {
+    const players = findPlayerIframes();
+    if (players.length) showPlayerNotice(players);
+  }
   updateStatus(true);
   console.log('%c[SRT Injector] đã sẵn sàng. Chọn file .srt (chỉ cần 1 lần, sẽ lưu sẵn) rồi bấm Bắt đầu.',
     'color:#0ea5a4;font-weight:bold;');
