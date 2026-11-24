@@ -22,9 +22,12 @@
  *   - Dòng trạng thái chỉ cập nhật tối đa 1 lần/giây.
  *
  * VIDEO NẰM TRONG IFRAME (player nhúng kiểu <div id="player-wrapper"><iframe ...>):
- *   Trang chính không đọc được giờ phát của video trong iframe khác origin,
- *   nên tool tự nhận diện và chỉ hiện nút "Mở tab player" trong bảng
- *   (kề bên nút "Quét lại" — dò video thủ công):
+ *   Trang chính không đọc được giờ phát của video trong iframe khác origin.
+ *   Nút "Quét lại" quét HẾT iframe còn hiện trên trang (chỉ bỏ khung 0×0)
+ *   rồi xếp hạng theo độ giống player — đảm bảo quét ra được; dropdown
+ *   "Video/Khung" liệt kê cả video trực tiếp lẫn các khung (Khung 1, 2...),
+ *   nhiều cái thì chọn trong đó, khung giống player nhất lên đầu. Chọn 1
+ *   khung thì nút "Mở tab player" (kề bên nút "Quét lại") mở đúng khung đó:
  *   Cách 1 (nhanh nhất): bấm "Mở tab player" — mở tab mới chỉ có player,
  *   dán lại lệnh 1 dòng trong tab đó là chạy (video thành top-level).
  *   Cách 2: trong DevTools, bấm khung "top" phía trên console -> chọn iframe
@@ -176,26 +179,34 @@
   // Tìm iframe giống player (video nhúng kiểu <div id="player-wrapper"><iframe ...>).
   // Trang chính không đọc được nội dung iframe khác origin, nên chỉ nhận diện
   // để hướng dẫn user chạy tool TRONG iframe (hoặc mở player ra tab mới).
-  function findPlayerIframes() {
+  // Quét HẾT iframe còn hiện trên trang (chỉ bỏ khung 0×0) rồi xếp hạng theo
+  // độ giống player — đảm bảo quét ra được, kể cả iframe nhỏ/lạ; nếu nhiều
+  // cái thì user chọn trong dropdown. minScore: chỉ lấy iframe có điểm
+  // giống player (dùng cho các chỗ tự hiện nút, tránh nhận nhầm quảng cáo).
+  function findPlayerIframes(minScore) {
     const out = [];
     document.querySelectorAll('iframe').forEach(f => {
       const r = f.getBoundingClientRect();
-      if (r.width < 120 || r.height < 90) return;   // bỏ iframe nhỏ (quảng cáo, tracking)
+      if (r.width <= 0 || r.height <= 0) return;   // bỏ khung không hiện
       const wrap = f.closest('[id*="player"], [class*="player"], [id*="video"], [class*="video"]');
       const src = f.getAttribute('src') || '';
-      let host = '', url = src;
-      try {
-        const u = new URL(src, location.href);
-        host = u.hostname;
-        url = u.href;
-      } catch (e) { /* kệ */ }
+      let host = '', url = '';
+      if (src) {
+        try {
+          const u = new URL(src, location.href);
+          host = u.hostname;
+          url = u.href;
+        } catch (e) { /* kệ */ }
+      }
       let score = 0;
       if (wrap) score += 2;                                            // nằm trong khối player
       if (/play|embed|video|player|stream/i.test(src)) score += 1;     // link kiểu player
       if (r.width >= 480 && r.height >= 270) score += 1;              // đủ lớn để xem
       out.push({ el: f, src, url, host, score, w: Math.round(r.width), h: Math.round(r.height) });
     });
-    return out.sort((a, b) => b.score - a.score);
+    return out
+      .filter(p => p.score >= (minScore || 0))
+      .sort((a, b) => (b.score - a.score) || ((b.w * b.h) - (a.w * a.h)));
   }
 
   /* ---------- State ---------- */
@@ -624,6 +635,16 @@
     pickElement(hit);
     return true;
   }
+  // Lưu khung player đã chọn (bấm chọn, hoặc chọn trong dropdown quét được).
+  function setPickedIframe(el) {
+    const src = el.getAttribute('src') || '';
+    let host = '';
+    try { host = new URL(src, location.href).host; } catch (_) {}
+    savePicked({ type: 'iframe', src, host });
+    pickedIframe = el;
+    setStatus('Đã lưu khung player (' + (host || 'iframe') + ') — phụ đề cần chạy lệnh trong khung player (xem hướng dẫn trong bảng).');
+    if (settings.autoPortrait) enterPortrait();
+  }
   function pickElement(el) {
     if (el.tagName === 'VIDEO') {
       savePicked({ type: 'video', selector: cssPath(el), src: el.currentSrc || el.src || '' });
@@ -633,14 +654,8 @@
       if (cues.length && !running) startRunning();   // bám theo thời gian video luôn
       else setStatus('Đã lưu video đã chọn — ' + (running ? 'đang chạy.' : 'chọn file .srt hoặc tìm phụ đề bên dưới.'));
     } else {
-      const src = el.getAttribute('src') || '';
-      let host = '';
-      try { host = new URL(src, location.href).host; } catch (_) {}
-      savePicked({ type: 'iframe', src, host });
-      pickedIframe = el;
+      setPickedIframe(el);
       exitPickMode();
-      setStatus('Đã lưu khung player (' + (host || 'iframe') + ') — phụ đề cần chạy lệnh trong khung player (xem hướng dẫn trong bảng).');
-      if (settings.autoPortrait) enterPortrait();
     }
   }
   function onPickClick(e) {
@@ -982,28 +997,41 @@
     if (noticePlayer && noticePlayer.url) (origOpen || window.open).call(window, noticePlayer.url, '_blank');   // dùng window.open gốc để không bị chặn quảng cáo chặn luôn
   };
 
-  // Hàng: chọn video (nếu trang có nhiều video)
+  // Hàng: chọn video/khung (nếu trang có nhiều video hoặc nhiều iframe player)
   const videoSel = document.createElement('select');
   videoSel.style.cssText = 'flex:1;min-width:0;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:5px 7px;';
-  videoSel.innerHTML = '<option value="">Bấm Bắt đầu để quét video</option>';
+  videoSel.innerHTML = '<option value="">Bấm Bắt đầu để quét video / khung</option>';
+  let scanList = [];   // [{kind:'video'|'iframe', el, ...}] — danh sách quét được, dùng chung cho dropdown + nút Quét lại
   function refreshVideoList() {
-    const list = findVideos();
     const cur = videoSel.value;
+    const videos = findVideos();
+    const players = findPlayerIframes();   // quét HẾT iframe còn hiện, xếp hạng giống player
+    scanList = [
+      ...videos.map(el => ({ kind: 'video', el })),
+      ...players.map(p => ({ kind: 'iframe', el: p.el, host: p.host, url: p.url, w: p.w, h: p.h, score: p.score })),
+    ];
     videoSel.innerHTML = '';
-    if (!list.length) {
-      videoSel.innerHTML = '<option value="">Không thấy video nào</option>';
-      return list;
+    if (!scanList.length) {
+      videoSel.innerHTML = '<option value="">Không thấy video hay khung nào</option>';
+      return scanList;
     }
-    list.forEach((v, i) => {
+    let vn = 0, fn = 0;
+    scanList.forEach((it, i) => {
       const o = document.createElement('option');
-      const r = v.getBoundingClientRect();
+      const r = it.el.getBoundingClientRect();
       o.value = String(i);
-      o.textContent = `Video ${i + 1} — ${Math.round(r.width)}×${Math.round(r.height)}${v.paused ? '' : ' ▶'}`;
+      if (it.kind === 'video') {
+        vn++;
+        o.textContent = `Video ${vn} — ${Math.round(r.width)}×${Math.round(r.height)}${it.el.paused ? '' : ' ▶'}`;
+      } else {
+        fn++;
+        o.textContent = `Khung ${fn} — ${it.host || 'iframe'} (${Math.round(r.width)}×${Math.round(r.height)})`;
+      }
       videoSel.appendChild(o);
     });
-    const idx = Math.max(0, Math.min(+cur || 0, list.length - 1));
+    const idx = Math.max(0, Math.min(+cur || 0, scanList.length - 1));
     videoSel.value = String(idx);
-    return list;
+    return scanList;
   }
   function setVideo(v) {
     if (video && video !== v) detachVideoListeners(video);
@@ -1016,21 +1044,25 @@
     updatePortraitBtn();
   }
   videoSel.onchange = () => {
-    const list = findVideos();
-    if (list[+videoSel.value]) setVideo(list[+videoSel.value]);
+    const it = scanList[+videoSel.value];
+    if (!it) return;
+    if (it.kind === 'video') { setVideo(it.el); hidePlayerNotice(); }
+    else { setPickedIframe(it.el); showPlayerNotice([it]); }   // chọn khung -> hiện nút Mở tab player cho đúng khung đó
   };
   rescanBtn.onclick = () => {
-    const list = refreshVideoList();
-    if (list.length) {
-      setVideo(list[+videoSel.value || 0]);
+    refreshVideoList();
+    const it = scanList[+videoSel.value || 0];
+    if (!it) { setStatus('Không thấy video hay khung nào — mở video rồi bấm Quét lại.'); return; }
+    if (it.kind === 'video') {
+      setVideo(it.el);
       hidePlayerNotice();
     } else {
-      const players = findPlayerIframes();
-      if (players.length) showPlayerNotice(players);
+      setPickedIframe(it.el);
+      showPlayerNotice([it]);   // hiện nút Mở tab player cho đúng khung vừa chọn
     }
     updateStatus();
   };
-  const videoRow = row('Video', videoSel);
+  const videoRow = row('Video/Khung', videoSel);
   body.appendChild(videoRow);
 
   // Hàng: chọn file .srt (lưu sẵn trong máy)
@@ -1326,7 +1358,7 @@
   function scanAndStart() {
     clearTimeout(scanTimer);
     const list = refreshVideoList();
-    const v = pickVideo(list);
+    const v = pickVideo(list.filter(x => x.kind === 'video').map(x => x.el));
     if (v) {
       setVideo(v);
       startRunning();
@@ -1338,7 +1370,7 @@
       scanTimer = setTimeout(scanAndStart, 500);
       return;
     }
-    const players = findPlayerIframes();
+    const players = findPlayerIframes(1);   // chỉ iframe giống player mới tự hiện nút
     if (players.length) {
       showPlayerNotice(players);
       if (settings.autoPortrait) enterPortrait();   // phóng to dọc ngay trên iframe player
@@ -1430,7 +1462,7 @@
   const pickedOk = applyPicked();   // dùng lại video/khung đã lưu bằng cách bấm chọn
   // Nếu trang không có video trực tiếp mà có iframe player thì hiện hướng dẫn ngay.
   if (!video && !findVideos().length) {
-    const players = findPlayerIframes();
+    const players = findPlayerIframes(1);   // chỉ iframe giống player mới tự hiện nút
     if (players.length) showPlayerNotice(players);
   }
   document.addEventListener('keydown', onKey);   // Esc thoát xem dọc / hủy chọn video
