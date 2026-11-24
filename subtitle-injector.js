@@ -59,12 +59,15 @@
  *   thì bỏ tick.
  *
  * CHỌN VIDEO BẰNG CÁCH BẤM VÀO NÓ (nút "🎯 Chọn video" trong bảng):
- *   Bấm nút → di chuột lên video đang phát (nó viền xanh) → bấm vào video,
- *   hoặc chạm thẳng vào khung video trên điện thoại. Script tự nhận diện
- *   element tại điểm bấm: đúng mảng chứa video (kể cả bấm vào lớp phủ trên
- *   mặt video) là lấy video đó và bám theo thời gian của nó luôn. Bấm vào
- *   khung player (iframe) thì lưu khung đó. Lần sau chạy lệnh, video/khung
- *   đã lưu được dùng luôn, khỏi quét lại. Bấm vào bảng hoặc Esc để hủy.
+ *   Bấm nút → panel ẨN NGAY, toàn màn hình là web để nhận diện element
+ *   (panel che mất video là hay bị lỗi không chọn được). Di chuột lên video
+ *   đang phát (nó viền xanh) → bấm vào video, hoặc chạm thẳng vào khung
+ *   video trên điện thoại. Script tự nhận diện element tại điểm bấm: đúng
+ *   mảng chứa video (kể cả bấm vào lớp phủ trên mặt video) là lấy video đó
+ *   và bám theo thời gian của nó luôn. Bấm vào khung player (iframe) thì
+ *   lưu khung đó. Hủy bằng nút nổi "Đang chọn video — bấm đây để hủy" ở
+ *   cuối màn hình, hoặc phím Esc. Lần sau chạy lệnh, video/khung đã lưu
+ *   được dùng luôn, khỏi quét lại.
  *
  * Chạy lại lệnh bất cứ lúc nào để reset sạch (bản cũ tự gỡ trước khi chạy mới).
  * Không gửi dữ liệu đi đâu. Cài đặt + file .srt lưu trong localStorage.
@@ -219,6 +222,7 @@
   let pickMode = false;      // đang ở chế độ bấm chọn video hay không
   let pickHL = null;         // phần tử đang viền xanh khi di chuột chọn video
   let pickedIframe = null;   // iframe player đã lưu bằng cách bấm chọn
+  let pickCancelBtn = null;  // nút Hủy nổi khi đang chọn video (panel đã ẩn)
 
   /* ---------- Lớp phủ phụ đề (bám theo video, kể cả fullscreen) ---------- */
   const overlay = document.createElement('div');
@@ -641,6 +645,7 @@
   }
   function onPickClick(e) {
     if (!pickMode) return;
+    if (pickCancelBtn && pickCancelBtn.contains(e.target)) return;   // để nút Hủy nhận bấm
     if (panel.contains(e.target)) { exitPickMode(); return; }   // bấm vào bảng = hủy chọn
     e.preventDefault();
     e.stopPropagation();
@@ -653,6 +658,7 @@
   // video; chạm chỗ khác thì để yên cho trang lướt/bấm bình thường.
   function onPickTouch(e) {
     if (!pickMode) return;
+    if (pickCancelBtn && pickCancelBtn.contains(e.target)) return;   // để nút Hủy nhận chạm
     const t = e.touches && e.touches[0];
     if (!t) return;
     if (panel.contains(e.target)) { exitPickMode(); return; }   // chạm vào bảng = hủy chọn
@@ -664,10 +670,28 @@
     e.stopImmediatePropagation();
     pickElement(hit);
   }
+  // Nút Hủy nổi khi đang chọn video — panel đã ẩn nên cần 1 lối thoát riêng.
+  function ensurePickCancelBtn() {
+    if (!pickCancelBtn) {
+      pickCancelBtn = document.createElement('button');
+      pickCancelBtn.textContent = '🎯 Đang chọn video — bấm đây để hủy';
+      Object.assign(pickCancelBtn.style, {
+        position: 'fixed', left: '50%', bottom: '16px', transform: 'translateX(-50%)',
+        zIndex: '2147483647', background: 'rgba(20,20,25,.92)', color: '#fff',
+        border: '1px solid #14B8A6', borderRadius: '999px', padding: '10px 16px',
+        fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap',
+        boxShadow: '0 4px 16px rgba(0,0,0,.5)',
+      });
+      pickCancelBtn.onclick = () => exitPickMode();
+    }
+    if (!pickCancelBtn.parentElement) document.body.appendChild(pickCancelBtn);
+  }
   function enterPickMode() {
     pickMode = true;
     pickBtn.textContent = '✕ Hủy chọn video';
-    setStatus('Chế độ chọn video: di chuột lên video (nó viền xanh) rồi bấm, hoặc chạm thẳng vào khung video trên điện thoại — đúng mảng chứa video là nó bám theo giờ video luôn. Bấm vào bảng hoặc Esc để hủy.');
+    panel.style.display = 'none';   // ẩn panel ngay — toàn màn hình là web, bấm đâu cũng nhận diện được
+    ensurePickCancelBtn();
+    pickCancelBtn.style.display = '';
     window.addEventListener('mousemove', onPickMove, true);
     window.addEventListener('click', onPickClick, true);
     window.addEventListener('touchstart', onPickTouch, { capture: true, passive: false });
@@ -679,6 +703,8 @@
     window.removeEventListener('mousemove', onPickMove, true);
     window.removeEventListener('click', onPickClick, true);
     window.removeEventListener('touchstart', onPickTouch, true);
+    if (pickCancelBtn) pickCancelBtn.style.display = 'none';
+    panel.style.display = '';   // hiện lại bảng
     if (pickBtn) pickBtn.textContent = '🎯 Chọn video';   // chỉ gọi sau khi bảng đã dựng xong
   }
   function applyPicked() {
@@ -1372,6 +1398,7 @@
     document.removeEventListener('fullscreenchange', onFs);
     document.removeEventListener('keydown', onKey);
     if (panel.parentElement) panel.parentElement.removeChild(panel);
+    if (pickCancelBtn && pickCancelBtn.parentElement) pickCancelBtn.parentElement.removeChild(pickCancelBtn);
     if (parentEl && parentEl.style.position === 'relative') {
       parentEl.style.position = parentOrigPos;
     }
