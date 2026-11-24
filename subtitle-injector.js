@@ -46,8 +46,10 @@
  *   phụ đề luôn, không cần tải file về máy trước.
  *   Vì subtitlecat.com chặn đọc từ web khác (CORS), script tải qua các
  *   đường trung gian (r.jina.ai cho trang HTML, api.cors.lol / allorigins /
- *   codetabs cho file .srt) — đường nào sống thì dùng đường đó; nếu tất cả
- *   đều bận (giới hạn lượt) thì đợi 1 phút rồi bấm Tìm lại.
+ *   codetabs cho file .srt) — CHẠY SONG SONG, đường nào trả về nội dung
+ *   đúng trước thì lấy ngay (thường 2–3 giây), nội dung sai (trang báo lỗi)
+ *   bị loại; nếu tất cả đều bận thì báo rõ lý do từng đường, đợi 1 phút
+ *   rồi bấm lại.
  *
  * CHẶN QUẢNG CÁO NHẢY TRANG (mặc định BẬT, tắt được bằng tick trong bảng):
  *   Chặn cửa sổ bật ra (window.open), chặn bấm vào link quảng cáo sang
@@ -651,28 +653,48 @@
   }
 
   /* ---------- Tìm phụ đề trên SubtitleCat (qua proxy, vì web chặn CORS) ---------- */
-  // Thử lần lượt các đường lấy nội dung: trực tiếp -> jina (chỉ HTML) ->
-  // allorigins -> codetabs -> cors.lol. Đường nào trả về thì dùng đường đó.
-  async function fetchTextVia(rawUrl, kind) {
+  // Kiểm tra nội dung trả về có đúng thứ cần không — proxy lỗi hay trả trang
+  // báo lỗi với HTTP 200 thì phải loại, không được nhận bừa (trước đây chỉ
+  // kiểm tra dài > 50 ký tự nên trang lỗi cũng được nhận rồi parse ra 0 câu).
+  function isGoodCatText(text, kind, needle) {
+    if (!text || text.length < 50) return false;
+    if (kind === 'srt') return /\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->/.test(text);   // phải có mốc giờ SRT
+    return !needle || text.indexOf(needle) !== -1;
+  }
+  // Chạy SONG SONG tất cả các đường, đường nào trả về nội dung đúng trước thì
+  // lấy ngay (thường 2–3 giây). Trước đây thử LẦN LƯỢT, mỗi đường treo tới
+  // 12s nên bấm xong đợi cả nửa phút mới báo lỗi — mà lúc đó allorigins /
+  // codetabs lại đang chết, cors.lol thì bị giới hạn lượt nên toàn lỗi.
+  async function fetchTextVia(rawUrl, kind, needle) {
     const enc = encodeURIComponent(rawUrl);
-    const tries = [rawUrl];
+    const tries = [{ url: rawUrl, name: 'trực tiếp' }];
     if (kind === 'html') {
-      tries.push({ url: 'https://r.jina.ai/' + rawUrl, headers: { 'X-Return-Format': 'html' } });
+      tries.push({ url: 'https://r.jina.ai/' + rawUrl, name: 'jina', headers: { 'X-Return-Format': 'html' } });
     }
-    tries.push('https://api.allorigins.win/raw?url=' + enc);
-    tries.push('https://api.codetabs.com/v1/proxy?quest=' + enc);
-    tries.push('https://api.cors.lol/?url=' + enc);
-    for (const t of tries) {
-      const url = typeof t === 'string' ? t : t.url;
-      const headers = typeof t === 'string' ? {} : (t.headers || {});
+    tries.push(
+      { url: 'https://api.allorigins.win/raw?url=' + enc, name: 'allorigins' },
+      { url: 'https://api.codetabs.com/v1/proxy?quest=' + enc, name: 'codetabs' },
+      { url: 'https://api.cors.lol/?url=' + enc, name: 'cors.lol' }
+    );
+    const fails = [];
+    const jobs = tries.map(t => (async () => {
       try {
-        const r = await fetch(url, { headers, signal: AbortSignal.timeout(12000) });
-        if (!r.ok) continue;
+        const r = await fetch(t.url, { headers: t.headers || {}, signal: AbortSignal.timeout(10000) });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
         const text = await r.text();
-        if (text && text.length > 50) return text;
-      } catch (_) { /* thử đường khác */ }
+        if (!isGoodCatText(text, kind, needle)) throw new Error('trả về không đúng nội dung');
+        return text;
+      } catch (e) {
+        fails.push(t.name + ': ' + (e && e.message ? e.message : 'lỗi mạng'));
+        throw e;
+      }
+    })());
+    try {
+      return await Promise.any(jobs);
+    } catch (_) {
+      fetchTextVia.lastError = fails.join(' | ');   // để báo đúng lý do từng đường
+      return null;
     }
-    return null;
   }
   // Trang tìm kiếm: bảng table.sub-table, mỗi hàng 1 link subs/*.html
   function parseCatSearch(html) {
@@ -724,10 +746,10 @@
     catResults.innerHTML = '';
     catLangs.style.display = 'none';
     catResults.style.display = '';
-    const html = await fetchTextVia('https://www.subtitlecat.com/index.php?search=' + encodeURIComponent(q), 'html');
+    const html = await fetchTextVia('https://www.subtitlecat.com/index.php?search=' + encodeURIComponent(q), 'html', 'sub-table');
     catBtn.disabled = false;
     if (!html) {
-      catStatus.textContent = 'Không tải được trang tìm kiếm (proxy bận / bị giới hạn) — đợi 1 phút rồi bấm Tìm lại.';
+      catStatus.textContent = 'Không tải được trang tìm kiếm (' + (fetchTextVia.lastError || 'proxy bận') + ') — đợi 1 phút rồi bấm Tìm lại.';
       return;
     }
     const res = parseCatSearch(html);
@@ -747,8 +769,8 @@
     catLangs.style.display = '';
     catLangs.innerHTML = '';
     catStatus.textContent = 'Đang lấy danh sách ngôn ngữ…';
-    const html = await fetchTextVia(r.url, 'html');
-    if (!html) { catStatus.textContent = 'Không tải được trang chi tiết — đợi 1 phút rồi thử lại.'; return; }
+    const html = await fetchTextVia(r.url, 'html', 'sub-single');
+    if (!html) { catStatus.textContent = 'Không tải được trang chi tiết (' + (fetchTextVia.lastError || 'proxy bận') + ') — đợi 1 phút rồi thử lại.'; return; }
     const langs = parseCatDetail(html);
     if (!langs.length) { catStatus.textContent = 'Trang này không có file phụ đề tải được (chỉ có nút Translate).'; return; }
     catStatus.textContent = 'Chọn ngôn ngữ cho: ' + r.title.slice(0, 60);
@@ -768,7 +790,7 @@
   async function catDownload(l) {
     catStatus.textContent = 'Đang tải phụ đề ' + l.name + '…';
     const text = await fetchTextVia(l.url, 'srt');
-    if (!text) { catStatus.textContent = 'Tải file .srt thất bại (proxy bận / bị giới hạn) — đợi 1 phút rồi bấm lại.'; return; }
+    if (!text) { catStatus.textContent = 'Tải file .srt thất bại (' + (fetchTextVia.lastError || 'proxy bận') + ') — đợi 1 phút rồi bấm lại.'; return; }
     const name = fileNameFromUrl(l.url);
     if (!loadText(text, name)) { catStatus.textContent = 'File tải về không phải phụ đề SRT hợp lệ.'; return; }
     catStatus.textContent = 'Đã tải ' + l.name + ' (' + cues.length + ' câu) — đang dùng luôn.';
