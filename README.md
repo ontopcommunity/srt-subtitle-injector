@@ -60,7 +60,7 @@ Nhiều web phim nhúng player kiểu này:
 <div id="player-wrapper"><iframe src="https://e.streamforester.name/videos/.../play?..."></iframe></div>
 ```
 
-Trang chính **không đọc được giờ phát** của video trong iframe khác origin, nên tool không chèn trực tiếp được. Tool tự nhận diện trường hợp này và chỉ hiện nút **"Mở tab player"** trong bảng, kề bên nút **"Quét lại"** (dò video thủ công). Bảng dài hơn màn hình thì lướt ngay trong bảng (tiêu đề vẫn đứng yên). Có 2 cách chạy:
+Trang chính **không đọc được giờ phát** của video trong iframe khác origin, nên tool không chèn trực tiếp được. Nút **"Quét lại"** quét **hết iframe còn hiện trên trang** (chỉ bỏ khung 0×0) rồi xếp hạng theo độ giống player — đảm bảo quét ra được, kể cả iframe nhỏ hay link lạ. Dropdown **"Video/Khung"** liệt kê cả video trực tiếp lẫn các khung (Khung 1, Khung 2...), nhiều cái thì chọn trong đó, khung giống player nhất lên đầu. Chọn 1 khung thì nút **"Mở tab player"** (kề bên nút "Quét lại") mở đúng khung đó. Bảng dài hơn màn hình thì lướt ngay trong bảng (tiêu đề vẫn đứng yên). Có 2 cách chạy:
 
 1. **Mở tab player (nhanh nhất):** bấm nút **"Mở tab player"** trong bảng — mở tab mới chỉ có player, dán lại lệnh 1 dòng trong tab đó là chạy (video thành top-level).
 2. **Chạy trong iframe:** trong DevTools, bấm khung **"top"** phía trên console → chọn iframe của player → dán lại lệnh 1 dòng. Tiêu đề bảng sẽ hiện "trong iframe".
