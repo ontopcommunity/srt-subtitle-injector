@@ -14,7 +14,7 @@ fetch('https://raw.githubusercontent.com/ontopcommunity/srt-subtitle-injector/ma
 
 1. Mở trang có video, mở DevTools (`F12` hoặc `Ctrl+Shift+J`), dán dòng lệnh trên vào console, Enter.
 2. Bảng điều khiển hiện ở góc phải màn hình. Chọn file `.srt` **1 lần duy nhất** — file được lưu sẵn trong máy, lần sau chạy lệnh là có sẵn, không cần chọn lại (cũng có thể dán link `.srt` hoặc kéo-thả file vào bảng).
-3. Bấm **▶ Bắt đầu** — tool quét video đang chạy 1 lần duy nhất, chèn phụ đề vào rồi ngừng quét hẳn. Phụ đề tự hiện theo đúng thời gian trong file, bám theo video kể cả khi xem fullscreen. Bấm **⏸ Dừng** để tắt.
+3. Bấm **▶ Bắt đầu** — tool quét video đang chạy 1 lần duy nhất, chèn phụ đề vào rồi ngừng quét hẳn. Phụ đề tự hiện theo đúng thời gian trong file, bám theo video kể cả khi xem fullscreen. Nút là **1 nút đổi trạng thái**: bấm xong thành **⏸ Dừng** (đang chạy), bấm nữa thì dừng. Chưa có phụ đề thì bấm không chạy mà bảng báo rõ + cuộn tới khung tìm phụ đề. Đã chọn khung iframe mà không có video trực tiếp thì bấm **Bắt đầu** sẽ mở tab player + chép sẵn lệnh để dán vào tab mới.
 
 ## Xem dọc — tự động phóng to lấp màn dọc, vẫn ở nguyên trang
 
@@ -78,7 +78,7 @@ Lưu ý: file `.srt` lưu theo host của player — chọn 1 lần cho mỗi ho
 
 | Mục | Chức năng |
 |---|---|
-| ▶ Bắt đầu / ⏸ Dừng | Quét video 1 lần rồi chạy / dừng hẳn |
+| ▶ Bắt đầu / ⏸ Dừng (1 nút đổi trạng thái) | Quét video 1 lần rồi chạy / dừng hẳn; chưa có phụ đề thì báo rõ; đã chọn khung iframe thì mở tab player + chép lệnh |
 | Video | Chọn video nếu trang có nhiều video, nút Quét lại để tìm video mới mở |
 | File .srt | Chọn file `.srt` / `.vtt` trên máy (lưu sẵn, lần sau khỏi chọn lại) |
 | Link .srt | Tải phụ đề từ link (web nào chặn CORS thì tải file về rồi chọn file) |
