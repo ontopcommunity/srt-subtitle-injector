@@ -59,10 +59,12 @@
  *   thì bỏ tick.
  *
  * CHỌN VIDEO BẰNG CÁCH BẤM VÀO NÓ (nút "🎯 Chọn video" trong bảng):
- *   Bấm nút → di chuột lên video đang phát (nó viền xanh) → bấm vào video
- *   để lưu lại làm video mục tiêu. Bấm vào khung player (iframe) thì lưu
- *   khung đó. Lần sau chạy lệnh, video/khung đã lưu được dùng luôn, khỏi
- *   quét lại. Bấm vào bảng hoặc phím Esc để hủy chọn.
+ *   Bấm nút → di chuột lên video đang phát (nó viền xanh) → bấm vào video,
+ *   hoặc chạm thẳng vào khung video trên điện thoại. Script tự nhận diện
+ *   element tại điểm bấm: đúng mảng chứa video (kể cả bấm vào lớp phủ trên
+ *   mặt video) là lấy video đó và bám theo thời gian của nó luôn. Bấm vào
+ *   khung player (iframe) thì lưu khung đó. Lần sau chạy lệnh, video/khung
+ *   đã lưu được dùng luôn, khỏi quét lại. Bấm vào bảng hoặc Esc để hủy.
  *
  * Chạy lại lệnh bất cứ lúc nào để reset sạch (bản cũ tự gỡ trước khi chạy mới).
  * Không gửi dữ liệu đi đâu. Cài đặt + file .srt lưu trong localStorage.
@@ -568,20 +570,39 @@
     }
     return parts.join(' > ');
   }
-  function pickCandidate(t) {
-    if (!t) return null;
-    let el = null;
-    if (t.closest) el = t.closest('video, iframe');
-    if (!el && t.querySelector) el = t.querySelector('video, iframe');
-    if (!el && (t.tagName === 'VIDEO' || t.tagName === 'IFRAME')) el = t;
-    return el;
+  // Tìm video/iframe mà điểm bấm (x, y) đang nằm trên: chính nó, hoặc video
+  // con cháu trong mảng đó, hoặc video trong mảng tổ tiên chứa nó — miễn là
+  // khung hình của video ôm điểm bấm (bấm vào mảng chứa video là được, kể cả
+  // bấm vào lớp phủ nút bấm/quảng cáo trên mặt video). Chỉ nhận video mà
+  // khung hình thực sự chứa điểm bấm, tránh nhận nhầm video khác trên trang.
+  function videoAtPoint(root, x, y) {
+    if (!root || !root.querySelectorAll) return null;
+    const list = root.querySelectorAll('video, iframe');
+    for (const v of list) {
+      const r = v.getBoundingClientRect();
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return v;
+    }
+    return null;
+  }
+  function resolvePickTarget(el, x, y) {
+    if (!el) return null;
+    if (el.tagName === 'VIDEO' || el.tagName === 'IFRAME') return el;
+    const inner = videoAtPoint(el, x, y);
+    if (inner) return inner;
+    let p = el.parentElement, n = 0;
+    while (p && n++ < 6) {
+      const v = videoAtPoint(p, x, y);
+      if (v) return v;
+      p = p.parentElement;
+    }
+    return null;
   }
   function clearPickHL() {
     if (pickHL) { try { pickHL.el.style.outline = pickHL.orig; } catch (_) {} pickHL = null; }
   }
   function onPickMove(e) {
     if (!pickMode) return;
-    const el = pickCandidate(e.target);
+    const el = resolvePickTarget(e.target, e.clientX, e.clientY);
     if (el === (pickHL && pickHL.el)) return;
     clearPickHL();
     if (el) {
@@ -590,23 +611,22 @@
       el.style.outlineOffset = '2px';
     }
   }
-  function onPickClick(e) {
-    if (!pickMode) return;
-    if (panel.contains(e.target)) { exitPickMode(); return; }   // bấm vào bảng = hủy chọn
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-    const el = pickCandidate(e.target);
-    if (!el) {
-      setStatus('Không thấy video ở chỗ bấm — bấm đúng vào khung video đang phát.');
-      return;
-    }
+  // Bấm vào 1 điểm (chuột hoặc chạm): nhận diện element tại đó, đúng mảng
+  // chứa video thì lấy video đó và bám theo thời gian của nó luôn.
+  function pickAtPoint(x, y) {
+    const el = document.elementFromPoint(x, y);
+    const hit = resolvePickTarget(el, x, y);
+    if (!hit) { setStatus('Không thấy video ở chỗ bấm — bấm đúng vào khung video đang phát.'); return false; }
+    pickElement(hit);
+    return true;
+  }
+  function pickElement(el) {
     if (el.tagName === 'VIDEO') {
       savePicked({ type: 'video', selector: cssPath(el), src: el.currentSrc || el.src || '' });
       pickedIframe = null;
       setVideo(el);
       exitPickMode();
-      if (cues.length && !running) startRunning();
+      if (cues.length && !running) startRunning();   // bám theo thời gian video luôn
       else setStatus('Đã lưu video đã chọn — ' + (running ? 'đang chạy.' : 'chọn file .srt hoặc tìm phụ đề bên dưới.'));
     } else {
       const src = el.getAttribute('src') || '';
@@ -619,12 +639,38 @@
       if (settings.autoPortrait) enterPortrait();
     }
   }
+  function onPickClick(e) {
+    if (!pickMode) return;
+    if (panel.contains(e.target)) { exitPickMode(); return; }   // bấm vào bảng = hủy chọn
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    pickAtPoint(e.clientX, e.clientY);
+  }
+  // Chạm trên điện thoại: chuột không có hover nên click thường bị trình
+  // phát video nuốt mất — bắt touchstart (capture) để nhận diện điểm chạm
+  // trước khi video/quảng cáo kịp phản ứng. Chỉ chặn chạm khi đúng mảng
+  // video; chạm chỗ khác thì để yên cho trang lướt/bấm bình thường.
+  function onPickTouch(e) {
+    if (!pickMode) return;
+    const t = e.touches && e.touches[0];
+    if (!t) return;
+    if (panel.contains(e.target)) { exitPickMode(); return; }   // chạm vào bảng = hủy chọn
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    const hit = resolvePickTarget(el, t.clientX, t.clientY);
+    if (!hit) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    pickElement(hit);
+  }
   function enterPickMode() {
     pickMode = true;
     pickBtn.textContent = '✕ Hủy chọn video';
-    setStatus('Chế độ chọn video: di chuột lên video đang phát (nó sẽ viền xanh), rồi bấm vào nó. Bấm vào bảng hoặc Esc để hủy.');
+    setStatus('Chế độ chọn video: di chuột lên video (nó viền xanh) rồi bấm, hoặc chạm thẳng vào khung video trên điện thoại — đúng mảng chứa video là nó bám theo giờ video luôn. Bấm vào bảng hoặc Esc để hủy.');
     window.addEventListener('mousemove', onPickMove, true);
     window.addEventListener('click', onPickClick, true);
+    window.addEventListener('touchstart', onPickTouch, { capture: true, passive: false });
   }
   function exitPickMode() {
     if (!pickMode && !pickHL) return;
@@ -632,6 +678,7 @@
     clearPickHL();
     window.removeEventListener('mousemove', onPickMove, true);
     window.removeEventListener('click', onPickClick, true);
+    window.removeEventListener('touchstart', onPickTouch, true);
     if (pickBtn) pickBtn.textContent = '🎯 Chọn video';   // chỉ gọi sau khi bảng đã dựng xong
   }
   function applyPicked() {
