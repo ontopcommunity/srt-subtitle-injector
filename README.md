@@ -14,7 +14,7 @@ fetch('https://raw.githubusercontent.com/ontopcommunity/srt-subtitle-injector/ma
 
 1. Mở trang có video, mở DevTools (`F12` hoặc `Ctrl+Shift+J`), dán dòng lệnh trên vào console, Enter.
 2. Bảng điều khiển hiện ở góc phải màn hình. Chọn file `.srt` **1 lần duy nhất** — file được lưu sẵn trong máy, lần sau chạy lệnh là có sẵn, không cần chọn lại (cũng có thể dán link `.srt` hoặc kéo-thả file vào bảng).
-3. Bấm **▶ Bắt đầu** — tool quét video đang chạy 1 lần duy nhất, chèn phụ đề vào rồi ngừng quét hẳn. Phụ đề tự hiện theo đúng thời gian trong file, bám theo video kể cả khi xem fullscreen. Nút là **1 nút đổi trạng thái**: bấm xong thành **⏸ Dừng** (đang chạy), bấm nữa thì dừng. Chưa có phụ đề thì bấm không chạy mà bảng báo rõ + cuộn tới khung tìm phụ đề. Đã chọn khung iframe mà không có video trực tiếp thì bấm **Bắt đầu** sẽ mở tab player + chép sẵn lệnh để dán vào tab mới.
+3. Bấm **▶ Bắt đầu** — tool quét video đang chạy 1 lần duy nhất, chèn phụ đề vào rồi ngừng quét hẳn. Phụ đề tự hiện theo đúng thời gian trong file, bám theo video kể cả khi xem fullscreen. Nút là **1 nút đổi trạng thái**: bấm xong thành **⏸ Dừng** (đang chạy), bấm nữa thì dừng. Chưa có phụ đề thì bấm không chạy mà bảng báo rõ + cuộn tới khung tìm phụ đề. Đã chọn khung iframe mà không có video trực tiếp thì bấm **Bắt đầu** sẽ chạy phụ đề ngay ở trang chính, lớp nằm trên khung player, theo đồng hồ (bấm cùng lúc bấm play; lệch thì chỉnh ±1s/±5s).
 
 ## Xem dọc — tự động phóng to lấp màn dọc, vẫn ở nguyên trang
 
@@ -60,9 +60,11 @@ Nhiều web phim nhúng player kiểu này:
 <div id="player-wrapper"><iframe src="https://e.streamforester.name/videos/.../play?..."></iframe></div>
 ```
 
-Trang chính **không đọc được giờ phát** của video trong iframe khác origin, nên tool không chèn trực tiếp được. Nút **"Quét lại"** quét **hết iframe còn hiện trên trang** (chỉ bỏ khung 0×0) rồi xếp hạng theo độ giống player — đảm bảo quét ra được, kể cả iframe nhỏ hay link lạ. Dropdown **"Video/Khung"** liệt kê cả video trực tiếp lẫn các khung (Khung 1, Khung 2...), nhiều cái thì chọn trong đó, khung giống player nhất lên đầu. Chọn 1 khung thì nút **"Mở tab player"** (kề bên nút "Quét lại") mở đúng khung đó. Bảng dài hơn màn hình thì lướt ngay trong bảng (tiêu đề vẫn đứng yên). Có 2 cách chạy:
+Trang chính **không đọc được giờ phát** của video trong iframe khác origin, và player cũng không gửi giờ ra ngoài (đã đọc code player JW 8.38.10: không có `postMessage` nào) — nên phụ đề **không chèn vào trong iframe** mà là **lớp nằm trên khung player ở trang chính**, chạy theo đồng hồ riêng: chọn khung trong dropdown **"Video/Khung"** (nút **"Quét lại"** quét **hết iframe còn hiện trên trang**, chỉ bỏ khung 0×0, xếp hạng giống player lên đầu), rồi **bấm Bắt đầu cùng lúc bấm play trên video**. Lệch thì chỉnh bằng hàng **"Đồng hồ"** trong bảng (±1s/±5s, ↺ về 0:00); bấm **Dừng** thì đồng hồ đứng theo, bấm **Bắt đầu** lại thì tiếp tục từ chỗ cũ. Bảng dài hơn màn hình thì lướt ngay trong bảng (tiêu đề vẫn đứng yên).
 
-1. **Mở tab player (nhanh nhất):** bấm nút **"Mở tab player"** trong bảng — mở tab mới chỉ có player, dán lại lệnh 1 dòng trong tab đó là chạy (video thành top-level).
+Muốn đồng bộ chính xác tuyệt đối thì có 2 cách khác:
+
+1. **Mở tab player:** bấm nút **"Mở tab player"** (kề bên nút "Quét lại") — mở tab mới chỉ có player, dán lại lệnh 1 dòng trong tab đó là chạy (video thành top-level).
 2. **Chạy trong iframe:** trong DevTools, bấm khung **"top"** phía trên console → chọn iframe của player → dán lại lệnh 1 dòng. Tiêu đề bảng sẽ hiện "trong iframe".
 
 Lưu ý: file `.srt` lưu theo host của player — chọn 1 lần cho mỗi host là xong.
@@ -78,7 +80,7 @@ Lưu ý: file `.srt` lưu theo host của player — chọn 1 lần cho mỗi ho
 
 | Mục | Chức năng |
 |---|---|
-| ▶ Bắt đầu / ⏸ Dừng (1 nút đổi trạng thái) | Quét video 1 lần rồi chạy / dừng hẳn; chưa có phụ đề thì báo rõ; đã chọn khung iframe thì mở tab player + chép lệnh |
+| ▶ Bắt đầu / ⏸ Dừng (1 nút đổi trạng thái) | Quét video 1 lần rồi chạy / dừng hẳn; chưa có phụ đề thì báo rõ; đã chọn khung iframe thì chạy phụ đề trên khung theo đồng hồ |
 | Video | Chọn video nếu trang có nhiều video, nút Quét lại để tìm video mới mở |
 | File .srt | Chọn file `.srt` / `.vtt` trên máy (lưu sẵn, lần sau khỏi chọn lại) |
 | Link .srt | Tải phụ đề từ link (web nào chặn CORS thì tải file về rồi chọn file) |
