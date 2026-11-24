@@ -40,6 +40,27 @@
  *   - Thoát bằng nút "✕ Thoát xem dọc" góc trái trên, phím Esc, hoặc nút
  *     "Xem dọc" trong bảng. Đổi video / xoay màn hình tự tính lại cỡ.
  *
+ * TÌM PHỤ ĐỀ TRÊN SUBTITLECAT (khung "🔍 Tìm phụ đề" trong bảng):
+ *   Gõ tên phim → bấm Tìm → bấm 1 kết quả để xem danh sách ngôn ngữ
+ *   (tiếng Việt lên đầu) → bấm 1 ngôn ngữ là tải file .srt về và chạy
+ *   phụ đề luôn, không cần tải file về máy trước.
+ *   Vì subtitlecat.com chặn đọc từ web khác (CORS), script tải qua các
+ *   đường trung gian (r.jina.ai cho trang HTML, api.cors.lol / allorigins /
+ *   codetabs cho file .srt) — đường nào sống thì dùng đường đó; nếu tất cả
+ *   đều bận (giới hạn lượt) thì đợi 1 phút rồi bấm Tìm lại.
+ *
+ * CHẶN QUẢNG CÁO NHẢY TRANG (mặc định BẬT, tắt được bằng tick trong bảng):
+ *   Chặn cửa sổ bật ra (window.open), chặn bấm vào link quảng cáo sang
+ *   web khác, và hỏi trước khi trang tự nhảy đi (beforeunload). Nút
+ *   "Mở tab player" vẫn mở được bình thường. Muốn duyệt web bình thường
+ *   thì bỏ tick.
+ *
+ * CHỌN VIDEO BẰNG CÁCH BẤM VÀO NÓ (nút "🎯 Chọn video" trong bảng):
+ *   Bấm nút → di chuột lên video đang phát (nó viền xanh) → bấm vào video
+ *   để lưu lại làm video mục tiêu. Bấm vào khung player (iframe) thì lưu
+ *   khung đó. Lần sau chạy lệnh, video/khung đã lưu được dùng luôn, khỏi
+ *   quét lại. Bấm vào bảng hoặc phím Esc để hủy chọn.
+ *
  * Chạy lại lệnh bất cứ lúc nào để reset sạch (bản cũ tự gỡ trước khi chạy mới).
  * Không gửi dữ liệu đi đâu. Cài đặt + file .srt lưu trong localStorage.
  * ========================================================================== */
@@ -66,6 +87,7 @@
     turbo: true,         // chế độ siêu tối ưu
     autoPortrait: true,  // tự phóng to dọc khi chạy / khi bấm Bắt đầu
     zoom: 1,             // độ phóng thêm ở chế độ xem dọc: 1 = vừa khít, tối đa 2
+    adBlock: true,       // chặn quảng cáo nhảy trang (window.open, link ngoài, hỏi trước khi rời trang)
   };
 
   // Lệnh 1 dòng để chạy lại tool (dùng cho nút "Sao chép lệnh")
@@ -187,6 +209,11 @@
   let exitBtnEl = null;
   let portraitTimer = 0;
   let portraitLeft = 0;
+  let adBlockOn = false;     // chặn quảng cáo nhảy trang đang bật hay không
+  let origOpen = null;       // window.open gốc (để nút "Mở tab player" vẫn mở được)
+  let pickMode = false;      // đang ở chế độ bấm chọn video hay không
+  let pickHL = null;         // phần tử đang viền xanh khi di chuột chọn video
+  let pickedIframe = null;   // iframe player đã lưu bằng cách bấm chọn
 
   /* ---------- Lớp phủ phụ đề (bám theo video, kể cả fullscreen) ---------- */
   const overlay = document.createElement('div');
@@ -350,9 +377,11 @@
     return { elW, elH, rotate: 0, boxW: elW, boxH: elH };
   }
 
-  // Mục tiêu để phóng to dọc: video đang chạy, nếu không có thì iframe player.
+  // Mục tiêu để phóng to dọc: video đang chạy, nếu không có thì khung player
+  // đã lưu bằng cách bấm chọn, rồi mới tới iframe player tự tìm được.
   function portraitTarget() {
     if (video) return video;
+    if (pickedIframe && document.contains(pickedIframe)) return pickedIframe;
     const players = findPlayerIframes();
     return players.length ? players[0].el : null;
   }
@@ -469,7 +498,289 @@
     }
   }
 
-  function onKey(e) { if (e.key === 'Escape' && portrait) exitPortrait(); }
+  function onKey(e) {
+    if (e.key !== 'Escape') return;
+    if (portrait) exitPortrait();
+    if (pickMode) exitPickMode();
+  }
+
+  /* ---------- Chặn quảng cáo nhảy trang ---------- */
+  function onAdClick(e) {
+    if (!adBlockOn) return;
+    const t = e.target;
+    if (!t || !t.closest) return;
+    const a = t.closest('a[href]');
+    if (!a) return;
+    try {
+      const u = new URL(a.getAttribute('href'), location.href);
+      if (u.origin !== location.origin) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      }
+    } catch (_) { /* link lỗi -> để yên */ }
+  }
+  function onBeforeUnload(e) {
+    if (!adBlockOn) return;
+    e.preventDefault();
+    e.returnValue = '';
+  }
+  function applyAdBlock(on) {
+    adBlockOn = !!on;
+    if (adBlockOn) {
+      if (!origOpen) origOpen = window.open;
+      window.open = function () { return null; };   // chặn popunder / tab quảng cáo
+      document.addEventListener('click', onAdClick, true);
+      window.addEventListener('beforeunload', onBeforeUnload);
+    } else {
+      if (origOpen) { window.open = origOpen; origOpen = null; }
+      document.removeEventListener('click', onAdClick, true);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    }
+    if (adBlockChk) adBlockChk.checked = adBlockOn;   // chỉ gọi sau khi bảng đã dựng xong
+  }
+
+  /* ---------- Bấm chọn video đang phát + lưu lại ---------- */
+  const PICK_KEY = 'srtInjectorPicked';
+  function savePicked(p) {
+    try { localStorage.setItem(PICK_KEY, JSON.stringify({ ...p, savedAt: Date.now() })); } catch (_) {}
+  }
+  function loadPicked() {
+    try { const s = localStorage.getItem(PICK_KEY); return s ? JSON.parse(s) : null; } catch (_) { return null; }
+  }
+  function cssPath(el) {
+    if (!el || el === document.body) return 'body';
+    const parts = [];
+    let n = el;
+    while (n && n !== document.body && parts.length < 6) {
+      if (n.id) { parts.unshift('#' + n.id); break; }
+      let s = n.tagName.toLowerCase();
+      const parent = n.parentElement;
+      if (parent) {
+        const sibs = Array.from(parent.children).filter(c => c.tagName === n.tagName);
+        if (sibs.length > 1) s += ':nth-of-type(' + (sibs.indexOf(n) + 1) + ')';
+      }
+      parts.unshift(s);
+      n = parent;
+    }
+    return parts.join(' > ');
+  }
+  function pickCandidate(t) {
+    if (!t) return null;
+    let el = null;
+    if (t.closest) el = t.closest('video, iframe');
+    if (!el && t.querySelector) el = t.querySelector('video, iframe');
+    if (!el && (t.tagName === 'VIDEO' || t.tagName === 'IFRAME')) el = t;
+    return el;
+  }
+  function clearPickHL() {
+    if (pickHL) { try { pickHL.el.style.outline = pickHL.orig; } catch (_) {} pickHL = null; }
+  }
+  function onPickMove(e) {
+    if (!pickMode) return;
+    const el = pickCandidate(e.target);
+    if (el === (pickHL && pickHL.el)) return;
+    clearPickHL();
+    if (el) {
+      pickHL = { el, orig: el.style.outline || '' };
+      el.style.outline = '3px solid #14B8A6';
+      el.style.outlineOffset = '2px';
+    }
+  }
+  function onPickClick(e) {
+    if (!pickMode) return;
+    if (panel.contains(e.target)) { exitPickMode(); return; }   // bấm vào bảng = hủy chọn
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    const el = pickCandidate(e.target);
+    if (!el) {
+      setStatus('Không thấy video ở chỗ bấm — bấm đúng vào khung video đang phát.');
+      return;
+    }
+    if (el.tagName === 'VIDEO') {
+      savePicked({ type: 'video', selector: cssPath(el), src: el.currentSrc || el.src || '' });
+      pickedIframe = null;
+      setVideo(el);
+      exitPickMode();
+      if (cues.length && !running) startRunning();
+      else setStatus('Đã lưu video đã chọn — ' + (running ? 'đang chạy.' : 'chọn file .srt hoặc tìm phụ đề bên dưới.'));
+    } else {
+      const src = el.getAttribute('src') || '';
+      let host = '';
+      try { host = new URL(src, location.href).host; } catch (_) {}
+      savePicked({ type: 'iframe', src, host });
+      pickedIframe = el;
+      exitPickMode();
+      setStatus('Đã lưu khung player (' + (host || 'iframe') + ') — phụ đề cần chạy lệnh trong khung player (xem hướng dẫn trong bảng).');
+      if (settings.autoPortrait) enterPortrait();
+    }
+  }
+  function enterPickMode() {
+    pickMode = true;
+    pickBtn.textContent = '✕ Hủy chọn video';
+    setStatus('Chế độ chọn video: di chuột lên video đang phát (nó sẽ viền xanh), rồi bấm vào nó. Bấm vào bảng hoặc Esc để hủy.');
+    window.addEventListener('mousemove', onPickMove, true);
+    window.addEventListener('click', onPickClick, true);
+  }
+  function exitPickMode() {
+    if (!pickMode && !pickHL) return;
+    pickMode = false;
+    clearPickHL();
+    window.removeEventListener('mousemove', onPickMove, true);
+    window.removeEventListener('click', onPickClick, true);
+    if (pickBtn) pickBtn.textContent = '🎯 Chọn video';   // chỉ gọi sau khi bảng đã dựng xong
+  }
+  function applyPicked() {
+    const p = loadPicked();
+    if (!p) return false;
+    if (p.type === 'video') {
+      let v = null;
+      if (p.src) v = findVideos().find(x => (x.currentSrc || x.src || '') === p.src);
+      if (!v && p.selector) {
+        try { const el = document.querySelector(p.selector); if (el && el.tagName === 'VIDEO') v = el; } catch (_) {}
+      }
+      if (v) { setVideo(v); return true; }
+    } else if (p.type === 'iframe') {
+      const list = findPlayerIframes();
+      const f = list.find(x => (x.el.getAttribute('src') || '') === p.src)
+        || list.find(x => x.host === p.host);
+      if (f) { pickedIframe = f.el; return true; }
+    }
+    return false;
+  }
+
+  /* ---------- Tìm phụ đề trên SubtitleCat (qua proxy, vì web chặn CORS) ---------- */
+  // Thử lần lượt các đường lấy nội dung: trực tiếp -> jina (chỉ HTML) ->
+  // allorigins -> codetabs -> cors.lol. Đường nào trả về thì dùng đường đó.
+  async function fetchTextVia(rawUrl, kind) {
+    const enc = encodeURIComponent(rawUrl);
+    const tries = [rawUrl];
+    if (kind === 'html') {
+      tries.push({ url: 'https://r.jina.ai/' + rawUrl, headers: { 'X-Return-Format': 'html' } });
+    }
+    tries.push('https://api.allorigins.win/raw?url=' + enc);
+    tries.push('https://api.codetabs.com/v1/proxy?quest=' + enc);
+    tries.push('https://api.cors.lol/?url=' + enc);
+    for (const t of tries) {
+      const url = typeof t === 'string' ? t : t.url;
+      const headers = typeof t === 'string' ? {} : (t.headers || {});
+      try {
+        const r = await fetch(url, { headers, signal: AbortSignal.timeout(12000) });
+        if (!r.ok) continue;
+        const text = await r.text();
+        if (text && text.length > 50) return text;
+      } catch (_) { /* thử đường khác */ }
+    }
+    return null;
+  }
+  // Trang tìm kiếm: bảng table.sub-table, mỗi hàng 1 link subs/*.html
+  function parseCatSearch(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const out = [];
+    doc.querySelectorAll('table.sub-table tbody tr').forEach(tr => {
+      const a = tr.querySelector('a[href*="subs/"]');
+      if (!a) return;
+      const href = a.getAttribute('href');
+      if (!href || !/\.html$/i.test(href)) return;
+      const title = (a.textContent || '').trim().replace(/\s+/g, ' ');
+      if (!title) return;
+      let url;
+      try { url = new URL(href, 'https://www.subtitlecat.com/').href; } catch (_) { return; }
+      const meta = Array.from(tr.querySelectorAll('.sub-table__metric-value'))
+        .map(e => (e.textContent || '').trim()).filter(Boolean).join(' · ');
+      out.push({ title, url, meta });
+    });
+    return out.slice(0, 30);
+  }
+  // Trang chi tiết: mỗi .sub-single là 1 ngôn ngữ (cờ + tên + nút Download .srt)
+  function parseCatDetail(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const out = [];
+    doc.querySelectorAll('.sub-single').forEach(el => {
+      const link = el.querySelector('a.green-link[href$=".srt"], a[href$=".srt"]');
+      if (!link) return;   // chỉ lấy mục có file tải được, bỏ nút Translate
+      const img = el.querySelector('img.flag');
+      const code = (img ? img.getAttribute('alt') : '') || '';
+      let name = '';
+      el.querySelectorAll('span').forEach(s => {
+        const t = (s.textContent || '').trim();
+        if (t && !s.querySelector('img') && !s.querySelector('a')) name = t;
+      });
+      let url;
+      try { url = new URL(link.getAttribute('href'), 'https://www.subtitlecat.com/').href; } catch (_) { return; }
+      out.push({ code: code.trim().toLowerCase(), name: name || code, url });
+    });
+    const rank = x => (x.code === 'vi' || /viet/i.test(x.name) ? 0
+      : (x.code === 'en' || /english/i.test(x.name) ? 1 : 2));
+    out.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+    return out;
+  }
+  async function catSearch() {
+    const q = catInput.value.trim();
+    if (!q) { catStatus.textContent = 'Gõ tên phim rồi bấm Tìm.'; return; }
+    catBtn.disabled = true;
+    catStatus.textContent = 'Đang tìm trên SubtitleCat…';
+    catResults.innerHTML = '';
+    catLangs.style.display = 'none';
+    catResults.style.display = '';
+    const html = await fetchTextVia('https://www.subtitlecat.com/index.php?search=' + encodeURIComponent(q), 'html');
+    catBtn.disabled = false;
+    if (!html) {
+      catStatus.textContent = 'Không tải được trang tìm kiếm (proxy bận / bị giới hạn) — đợi 1 phút rồi bấm Tìm lại.';
+      return;
+    }
+    const res = parseCatSearch(html);
+    if (!res.length) { catStatus.textContent = 'Không thấy kết quả nào cho "' + q + '". Thử gõ tên khác / mã phim.'; return; }
+    catStatus.textContent = 'Thấy ' + res.length + ' kết quả — bấm 1 cái để xem ngôn ngữ.';
+    res.forEach(r => {
+      const b = document.createElement('button');
+      b.style.cssText = 'display:block;width:100%;text-align:left;background:#1a1d2e;color:#fff;border:1px solid #2a2f45;border-radius:6px;padding:6px 8px;margin:4px 0;cursor:pointer;font-size:12px;';
+      b.textContent = r.title + (r.meta ? '  (' + r.meta + ')' : '');
+      b.title = r.title;
+      b.onclick = () => catShowLangs(r);
+      catResults.appendChild(b);
+    });
+  }
+  async function catShowLangs(r) {
+    catResults.style.display = 'none';
+    catLangs.style.display = '';
+    catLangs.innerHTML = '';
+    catStatus.textContent = 'Đang lấy danh sách ngôn ngữ…';
+    const html = await fetchTextVia(r.url, 'html');
+    if (!html) { catStatus.textContent = 'Không tải được trang chi tiết — đợi 1 phút rồi thử lại.'; return; }
+    const langs = parseCatDetail(html);
+    if (!langs.length) { catStatus.textContent = 'Trang này không có file phụ đề tải được (chỉ có nút Translate).'; return; }
+    catStatus.textContent = 'Chọn ngôn ngữ cho: ' + r.title.slice(0, 60);
+    const back = document.createElement('button');
+    back.textContent = '← Quay lại kết quả';
+    back.style.cssText = 'display:block;width:100%;text-align:left;background:transparent;color:#9aa3b2;border:1px solid #2a2f45;border-radius:6px;padding:6px 8px;margin:4px 0;cursor:pointer;font-size:12px;';
+    back.onclick = () => { catLangs.style.display = 'none'; catResults.style.display = ''; catStatus.textContent = ''; };
+    catLangs.appendChild(back);
+    langs.forEach(l => {
+      const b = document.createElement('button');
+      b.textContent = (l.code === 'vi' ? '🇻🇳 ' : '') + l.name + (l.code ? ' (' + l.code + ')' : '');
+      b.style.cssText = 'display:block;width:100%;text-align:left;background:#1a1d2e;color:#fff;border:1px solid #2a2f45;border-radius:6px;padding:6px 8px;margin:4px 0;cursor:pointer;font-size:12px;';
+      b.onclick = () => catDownload(l);
+      catLangs.appendChild(b);
+    });
+  }
+  async function catDownload(l) {
+    catStatus.textContent = 'Đang tải phụ đề ' + l.name + '…';
+    const text = await fetchTextVia(l.url, 'srt');
+    if (!text) { catStatus.textContent = 'Tải file .srt thất bại (proxy bận / bị giới hạn) — đợi 1 phút rồi bấm lại.'; return; }
+    const name = fileNameFromUrl(l.url);
+    if (!loadText(text, name)) { catStatus.textContent = 'File tải về không phải phụ đề SRT hợp lệ.'; return; }
+    catStatus.textContent = 'Đã tải ' + l.name + ' (' + cues.length + ' câu) — đang dùng luôn.';
+    if (!running) {
+      if (video) startRunning();
+      else startBtn.onclick();
+    }
+  }
+  function fileNameFromUrl(u) {
+    try { const p = decodeURIComponent(new URL(u).pathname); return p.split('/').pop() || 'subtitle.srt'; }
+    catch (_) { return 'subtitle.srt'; }
+  }
 
   /* ---------- Bảng điều khiển ---------- */
   const panel = document.createElement('div');
@@ -576,7 +887,7 @@
   }
   function hidePlayerNotice() { noticeBox.style.display = 'none'; }
   openPlayerBtn.onclick = () => {
-    if (noticePlayer && noticePlayer.url) window.open(noticePlayer.url, '_blank');
+    if (noticePlayer && noticePlayer.url) (origOpen || window.open).call(window, noticePlayer.url, '_blank');   // dùng window.open gốc để không bị chặn quảng cáo chặn luôn
   };
   copyCmdBtn.onclick = async () => {
     try {
@@ -688,6 +999,31 @@
   urlWrap.appendChild(urlBtn);
   urlRow.appendChild(urlWrap);
   body.appendChild(urlRow);
+
+  // ---------- Tìm phụ đề trên SubtitleCat ----------
+  const catBox = document.createElement('div');
+  catBox.style.cssText = 'margin:6px 0 8px;padding:8px;border:1px solid #2a2f45;border-radius:8px;background:#12141f;';
+  const catTitle = document.createElement('div');
+  catTitle.textContent = '🔍 Tìm phụ đề (SubtitleCat)';
+  catTitle.style.cssText = 'font-weight:bold;font-size:13px;margin-bottom:6px;';
+  const catRow = document.createElement('div');
+  catRow.style.cssText = 'display:flex;gap:6px;';
+  const catInput = document.createElement('input');
+  catInput.type = 'text';
+  catInput.placeholder = 'Gõ tên phim, vd SONE-567';
+  catInput.style.cssText = 'flex:1;background:#0d0f1a;color:#fff;border:1px solid #333;padding:6px 8px;border-radius:6px;font-size:13px;min-width:0;';
+  const catBtn = mkBtn('Tìm', '#14B8A6');
+  const catStatus = document.createElement('div');
+  catStatus.style.cssText = 'font-size:12px;color:#9aa3b2;margin-top:6px;';
+  const catResults = document.createElement('div');
+  catResults.style.cssText = 'max-height:180px;overflow-y:auto;margin-top:4px;';
+  const catLangs = document.createElement('div');
+  catLangs.style.cssText = 'max-height:180px;overflow-y:auto;margin-top:4px;display:none;';
+  catRow.append(catInput, catBtn);
+  catBox.append(catTitle, catRow, catStatus, catResults, catLangs);
+  body.appendChild(catBox);
+  catBtn.onclick = catSearch;
+  catInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') catSearch(); });
 
   // Kéo-thả file vào bảng
   panel.addEventListener('dragover', e => e.preventDefault());
@@ -831,6 +1167,19 @@
   const zoomRow = row('Độ phóng', zoomInput); zoomRow.appendChild(zoomVal);
   body.appendChild(zoomRow);
 
+  // Hàng: chặn quảng cáo nhảy trang + bấm chọn video
+  const adBlockChk = document.createElement('input');
+  adBlockChk.type = 'checkbox'; adBlockChk.checked = settings.adBlock;
+  adBlockChk.onchange = () => {
+    settings.adBlock = adBlockChk.checked; saveSettings(); applyAdBlock(settings.adBlock);
+  };
+  const pickBtn = mkBtn('🎯 Chọn video');
+  pickBtn.onclick = () => (pickMode ? exitPickMode() : enterPickMode());
+  const abRow = document.createElement('div');
+  abRow.style.cssText = 'display:flex;gap:6px;align-items:center;margin:2px 0 8px;flex-wrap:wrap;';
+  abRow.append(mkChkLab(adBlockChk, 'Chặn quảng cáo nhảy trang'), pickBtn);
+  body.appendChild(abRow);
+
   // Dòng trạng thái (cập nhật tối đa 1 lần/giây)
   const statusEl = document.createElement('div');
   statusEl.style.cssText = 'margin-top:6px;padding-top:8px;border-top:1px solid #2a2a2a;color:#999;font-size:12px;line-height:1.5;min-height:18px;';
@@ -971,6 +1320,8 @@
     clearTimeout(portraitTimer);
     stopRunning();
     exitPortrait();
+    exitPickMode();
+    applyAdBlock(false);
     document.removeEventListener('fullscreenchange', onFs);
     document.removeEventListener('keydown', onKey);
     if (panel.parentElement) panel.parentElement.removeChild(panel);
@@ -1001,16 +1352,19 @@
   /* ---------- Khởi động ---------- */
   document.body.appendChild(panel);
   loadSavedFile();   // nạp file .srt đã lưu sẵn (nếu có) — chưa chạy phụ đề
+  applyAdBlock(settings.adBlock);
+  const pickedOk = applyPicked();   // dùng lại video/khung đã lưu bằng cách bấm chọn
   // Nếu trang không có video trực tiếp mà có iframe player thì hiện hướng dẫn ngay.
-  if (!findVideos().length) {
+  if (!video && !findVideos().length) {
     const players = findPlayerIframes();
     if (players.length) showPlayerNotice(players);
   }
-  document.addEventListener('keydown', onKey);   // Esc thoát xem dọc
+  document.addEventListener('keydown', onKey);   // Esc thoát xem dọc / hủy chọn video
   updateStatus(true);
   // Tự động khi chạy lệnh: có file lưu sẵn thì chạy phụ đề luôn; luôn thử phóng to dọc.
   if (cues.length) {
-    startBtn.onclick();
+    if (video) startRunning();
+    else startBtn.onclick();
   } else if (settings.autoPortrait) {
     portraitLeft = 8;   // thử tối đa ~4 giây rồi dừng hẳn
     tryAutoPortrait();
