@@ -16,6 +16,18 @@ fetch('https://raw.githubusercontent.com/ontopcommunity/srt-subtitle-injector/ma
 2. Bảng điều khiển hiện ở góc phải màn hình. Chọn file `.srt` **1 lần duy nhất** — file được lưu sẵn trong máy, lần sau chạy lệnh là có sẵn, không cần chọn lại (cũng có thể dán link `.srt` hoặc kéo-thả file vào bảng).
 3. Bấm **▶ Bắt đầu** — tool quét video đang chạy 1 lần duy nhất, chèn phụ đề vào rồi ngừng quét hẳn. Phụ đề tự hiện theo đúng thời gian trong file, bám theo video kể cả khi xem fullscreen. Bấm **⏸ Dừng** để tắt.
 
+## Xem dọc — tự động phóng to lấp màn dọc, vẫn ở nguyên trang
+
+Khi chạy lệnh (hoặc bấm **▶ Bắt đầu**), video tự động phóng to lấp màn hình **dọc** mà không chuyển tab, không dùng fullscreen ngang của trình duyệt:
+
+- Video ngang (16:9...) được **xoay 90°** để lấp màn dọc — màn 360×640 thì video 16:9 lấp đúng 360×640, không méo hình. Nút **"↻ Đổi chiều"** xoay ngược -90° nếu thấy ngược.
+- Video dọc sẵn thì không xoay, chỉ phóng to theo chiều cao.
+- Phụ đề vẫn bám đúng khung hình đang hiển thị, chữ thẳng để đọc.
+- Thoát bằng nút **"✕ Thoát xem dọc"** góc trái trên, phím **Esc**, hoặc nút **"Xem dọc"** trong bảng. Đổi video / xoay màn hình tự tính lại cỡ.
+- Bỏ tick **"Phóng to dọc khi bắt đầu"** trong bảng nếu không muốn tự động.
+
+Nút **⏯** trong bảng để tạm dừng / tiếp tục video khi đang xem dọc (lúc này thanh điều khiển gốc của player bị che sau video).
+
 ## Video nằm trong iframe (player nhúng)
 
 Nhiều web phim nhúng player kiểu này:
