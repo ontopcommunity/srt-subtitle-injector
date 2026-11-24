@@ -28,6 +28,30 @@ Khi chạy lệnh (hoặc bấm **▶ Bắt đầu**), video tự động phóng
 
 Nút **⏯** trong bảng để tạm dừng / tiếp tục video khi đang xem dọc (lúc này thanh điều khiển gốc của player bị che sau video).
 
+## Tìm phụ đề trên SubtitleCat — không cần tải file về máy
+
+Trong bảng có khung **"🔍 Tìm phụ đề (SubtitleCat)"**:
+
+1. Gõ tên phim (vd `SONE-567`) → bấm **Tìm** (hoặc Enter) → hiện list kết quả.
+2. Bấm 1 kết quả → hiện list ngôn ngữ (tiếng Việt lên đầu, rồi English, rồi các tiếng khác).
+3. Bấm 1 ngôn ngữ → file `.srt` được tải về và **chạy phụ đề luôn** (đồng thời lưu sẵn trong máy như file tự chọn).
+
+Vì subtitlecat.com chặn đọc từ web khác (CORS), script tải qua các đường trung gian: r.jina.ai (trang HTML), api.cors.lol / allorigins / codetabs (file .srt) — đường nào sống thì dùng đường đó. Nếu tất cả đều bận (bị giới hạn lượt), bảng sẽ báo, đợi 1 phút rồi bấm Tìm lại.
+
+## Chặn quảng cáo nhảy trang
+
+Mặc định **BẬT** (tick "Chặn quảng cáo nhảy trang" trong bảng):
+
+- Chặn cửa sổ bật ra (`window.open`) — quảng cáo popunder không mở được tab mới.
+- Chặn bấm vào link quảng cáo sang web khác.
+- Hỏi trước khi trang tự nhảy đi (trình duyệt hiện bảng "Rời khỏi trang?").
+
+Nút "Mở tab player" vẫn mở được bình thường. Muốn duyệt web bình thường thì bỏ tick.
+
+## Chọn video bằng cách bấm vào nó
+
+Bấm nút **"🎯 Chọn video"** trong bảng → di chuột lên video đang phát (nó viền xanh) → bấm vào video để lưu lại làm video mục tiêu. Bấm vào khung player (iframe) thì lưu khung đó. Lần sau chạy lệnh, video/khung đã lưu được dùng luôn, khỏi quét lại. Bấm vào bảng hoặc phím Esc để hủy chọn.
+
 ## Video nằm trong iframe (player nhúng)
 
 Nhiều web phim nhúng player kiểu này:
