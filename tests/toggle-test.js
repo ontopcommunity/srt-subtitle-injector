@@ -44,13 +44,14 @@ assert(toggle1().textContent.includes('Bắt đầu'), '3: dừng xong, nút ph�
 assert(w1.__srtInjector.running === false, '3: phải dừng hẳn');
 console.log('TOGGLE VIDEO TEST: PASS (1 nút đổi trạng thái, chưa có phụ đề thì báo rõ)');
 
-// --- Trang chỉ có iframe player ---
+// --- Trang chỉ có iframe player (tắt tự phóng dọc để khung giữ nguyên cỡ) ---
 const dom2 = new JSDOM(`<!DOCTYPE html><body>
 <div id="player-wrapper"><iframe id="pf" src="https://e.streamforester.name/videos/abc/play"></iframe></div>
 </body>`, { url: 'https://example.com/', pretendToBeVisual: true, runScripts: 'dangerously' });
 const w2 = dom2.window, d2 = w2.document;
 const opened = [];
 w2.open = (url) => { opened.push(url); return null; };
+w2.localStorage.setItem('srtInjectorSettings', JSON.stringify({ autoPortrait: false }));
 w2.Element.prototype.getBoundingClientRect = function () {
   return this.id === 'pf' ? { width: 800, height: 450, left: 0, top: 0, right: 800, bottom: 450 }
     : { width: 0, height: 0, left: 0, top: 0, right: 0, bottom: 0 };
@@ -66,14 +67,21 @@ click(w2, btn2('Quét lại'));
 assert(sel2.options.length >= 1 && sel2.options[0].textContent.startsWith('Khung 1'), '4: dropdown phải có Khung 1, thực tế: ' + sel2.options[0].textContent);
 sel2.value = '0';
 sel2.dispatchEvent(new w2.Event('change', { bubbles: true }));
-// Bấm Bắt đầu -> mở tab player đúng URL, không chạy tại chỗ
-click(w2, toggle2());
+// Nút Mở tab player vẫn mở đúng tab (lựa chọn đồng bộ chính xác)
+assert(btn2('Mở tab player').style.display !== 'none', '4: chọn Khung 1 thì nút Mở tab player phải hiện');
+click(w2, btn2('Mở tab player'));
 assert(opened.length === 1 && opened[0] === 'https://e.streamforester.name/videos/abc/play', '4: phải mở đúng tab player, thực tế: ' + JSON.stringify(opened));
-assert(w2.__srtInjector.running === false, '4: ở trang chính iframe thì không chạy tại chỗ');
-assert(toggle2().textContent.includes('Bắt đầu'), '4: nút phải vẫn là Bắt đầu');
-// trạng thái "Đã mở tab player" được đặt trong .then của copyLoader -> đợi 1 nhịp
-await new Promise(r => setTimeout(r, 50));
-assert(panel2.textContent.includes('Đã mở tab player'), '4: phải báo đã mở tab player');
-console.log('TOGGLE IFRAME TEST: PASS (chọn khung rồi Bắt đầu -> mở tab player + chép lệnh)');
+// Bấm Bắt đầu -> chạy phụ đề NGAY Ở TRANG CHÍNH: lớp nằm trên khung, theo đồng hồ
+click(w2, toggle2());
+assert(w2.__srtInjector.running === true, '4: phải chạy ở trang chính');
+assert(w2.__srtInjector.iframeMode === true, '4: phải ở chế độ khung player');
+assert(toggle2().textContent.includes('Dừng'), '4: đang chạy, nút phải thành Dừng');
+const ov2 = d2.getElementById('srt-injector-overlay');
+assert(ov2 && ov2.parentElement && ov2.parentElement.id === 'player-wrapper', '4: lớp phụ đề phải nằm trong thẻ cha của khung');
+assert(ov2.style.width === '800px' && ov2.style.height === '450px', '4: lớp phủ phải đúng bằng khung, thực tế: ' + ov2.style.width + 'x' + ov2.style.height);
+assert(panel2.textContent.includes('Đồng hồ:'), '4: phải hiện hàng đồng hồ');
+assert(panel2.textContent.includes('theo đồng hồ'), '4: phải báo chạy theo đồng hồ');
+w2.__srtInjector.stop();   // dừng nhịp đồng hồ để tiến trình thoát
+console.log('TOGGLE IFRAME TEST: PASS (chọn khung rồi Bắt đầu -> phụ đề trên khung theo đồng hồ, nút tab vẫn mở được)');
 console.log('TOGGLE TEST: ALL PASS');
 })().catch(e => { console.error(e); process.exit(1); });
