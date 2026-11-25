@@ -62,12 +62,13 @@
  *   Gõ tên phim → bấm Tìm → bấm 1 kết quả để xem danh sách ngôn ngữ
  *   (tiếng Việt lên đầu) → bấm 1 ngôn ngữ là tải file .srt về và chạy
  *   phụ đề luôn, không cần tải file về máy trước.
- *   Vì subtitlecat.com chặn đọc từ web khác (CORS), script tải qua các
- *   đường trung gian (r.jina.ai cho trang HTML, api.cors.lol / allorigins /
- *   codetabs cho file .srt) — CHẠY SONG SONG, đường nào trả về nội dung
- *   đúng trước thì lấy ngay (thường 2–3 giây), nội dung sai (trang báo lỗi)
- *   bị loại; nếu tất cả đều bận thì báo rõ lý do từng đường, đợi 1 phút
- *   rồi bấm lại.
+ *   Vì subtitlecat.com chặn đọc từ web khác (CORS), script tải qua proxy
+ *   RIÊNG trên shop ontopdz.shop (/api/subtitle-proxy) trước — tải hộ bằng
+ *   server, không giới hạn lượt nên luôn tải được; rớt thì mới đua các
+ *   đường công cộng (r.jina.ai cho trang HTML, api.cors.lol / allorigins /
+ *   codetabs cho file .srt), đường nào trả về nội dung đúng trước thì lấy
+ *   ngay (thường 2–3 giây), nội dung sai (trang báo lỗi) bị loại; nếu tất
+ *   cả đều bận thì báo rõ lý do từng đường, đợi 1 phút rồi bấm lại.
  *
  * CHẶN QUẢNG CÁO NHẢY TRANG (mặc định BẬT, tắt được bằng tick trong bảng):
  *   Chặn cửa sổ bật ra (window.open), chặn bấm vào link quảng cáo sang
@@ -854,12 +855,22 @@
     if (kind === 'srt') return /\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->/.test(text);   // phải có mốc giờ SRT
     return !needle || text.indexOf(needle) !== -1;
   }
-  // Chạy SONG SONG tất cả các đường, đường nào trả về nội dung đúng trước thì
-  // lấy ngay (thường 2–3 giây). Trước đây thử LẦN LƯỢT, mỗi đường treo tới
-  // 12s nên bấm xong đợi cả nửa phút mới báo lỗi — mà lúc đó allorigins /
-  // codetabs lại đang chết, cors.lol thì bị giới hạn lượt nên toàn lỗi.
+  // Đường tải phụ đề: thử proxy RIÊNG trên shop trước (tải hộ bằng server,
+  // không CORS, không giới hạn lượt — luôn tải được), rớt thì mới đua các
+  // proxy công cộng miễn phí (jina cho HTML; allorigins/codetabs/cors.lol
+  // cho .srt — bọn này hay chết hoặc bị giới hạn lượt nên không trông cậy
+  // được một mình). Đường nào trả về nội dung đúng trước thì lấy ngay.
   async function fetchTextVia(rawUrl, kind, needle) {
     const enc = encodeURIComponent(rawUrl);
+    // 1) Proxy riêng (8 giây) — đường chính, phải đúng nội dung mới nhận.
+    try {
+      const r = await fetch(`${PROXY_BASE}/api/subtitle-proxy?url=${enc}`, { signal: AbortSignal.timeout(8000) });
+      if (r.ok) {
+        const text = await r.text();
+        if (isGoodCatText(text, kind, needle)) return text;
+      }
+    } catch (_) { /* rớt xuống đua proxy công cộng */ }
+    // 2) Đua song song các proxy công cộng (mỗi đường 10 giây).
     const tries = [{ url: rawUrl, name: 'trực tiếp' }];
     if (kind === 'html') {
       tries.push({ url: 'https://r.jina.ai/' + rawUrl, name: 'jina', headers: { 'X-Return-Format': 'html' } });
@@ -869,7 +880,7 @@
       { url: 'https://api.codetabs.com/v1/proxy?quest=' + enc, name: 'codetabs' },
       { url: 'https://api.cors.lol/?url=' + enc, name: 'cors.lol' }
     );
-    const fails = [];
+    const fails = ['shop-proxy: không tải được'];
     const jobs = tries.map(t => (async () => {
       try {
         const r = await fetch(t.url, { headers: t.headers || {}, signal: AbortSignal.timeout(10000) });
