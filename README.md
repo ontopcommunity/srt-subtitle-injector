@@ -60,12 +60,12 @@ Nhiều web phim nhúng player kiểu này:
 <div id="player-wrapper"><iframe src="https://e.streamforester.name/videos/.../play?..."></iframe></div>
 ```
 
-Trang chính **không đọc được giờ phát** của video trong iframe khác origin, và player cũng không gửi giờ ra ngoài (đã đọc code player JW 8.38.10: không có `postMessage` nào) — nên phụ đề **không chèn vào trong iframe** mà là **lớp nằm trên khung player ở trang chính**, chạy theo đồng hồ riêng: chọn khung trong dropdown **"Video/Khung"** (nút **"Quét lại"** quét **hết iframe còn hiện trên trang**, chỉ bỏ khung 0×0, xếp hạng giống player lên đầu), rồi **bấm Bắt đầu cùng lúc bấm play trên video**. Lệch thì chỉnh bằng hàng **"Đồng hồ"** trong bảng (±1s/±5s, ↺ về 0:00); bấm **Dừng** thì đồng hồ đứng theo, bấm **Bắt đầu** lại thì tiếp tục từ chỗ cũ. Bảng dài hơn màn hình thì lướt ngay trong bảng (tiêu đề vẫn đứng yên).
+Trang chính **không đọc được giờ phát** của video trong iframe khác origin, và player cũng không gửi giờ ra ngoài (đã đọc code player JW 8.38.10: không có `postMessage` nào). Có 2 cách chạy:
 
-Muốn đồng bộ chính xác tuyệt đối thì có 2 cách khác:
+1. **Thay player (khớp 100%, tua thoải mái — khuyên dùng):** chọn khung trong dropdown **"Video/Khung"** rồi bấm **"▶ Thay player (khớp 100%)"** — tool lấy link HLS gốc của video qua proxy trên shop rồi tạo `<video>` thật thế chỗ iframe trong trang. Phụ đề gắn vào video thật nên bám đúng giờ video: tua tới đâu là đúng đoạn phụ đề tới đó, không cần đồng hồ riêng. Chỉ Safari (iPhone/Mac) phát được HLS gốc — Chrome bị host video chặn nên không tải được playlist (bấm nút sẽ báo rõ). Video thay ra bắt đầu từ 0, quảng cáo của player gốc không còn; bấm **"Khôi phục player"** để về lại player cũ.
+2. **Đồng hồ (mọi trình duyệt):** bấm **Bắt đầu cùng lúc bấm play** trên video — phụ đề là **lớp nằm trên khung player ở trang chính**, chạy theo đồng hồ riêng. Lệch thì chỉnh bằng hàng **"Đồng hồ"** trong bảng (±1s/±5s, ↺ về 0:00); bấm **Dừng** thì đồng hồ đứng theo, bấm **Bắt đầu** lại thì tiếp tục từ chỗ cũ.
 
-1. **Mở tab player:** bấm nút **"Mở tab player"** (kề bên nút "Quét lại") — mở tab mới chỉ có player, dán lại lệnh 1 dòng trong tab đó là chạy (video thành top-level).
-2. **Chạy trong iframe:** trong DevTools, bấm khung **"top"** phía trên console → chọn iframe của player → dán lại lệnh 1 dòng. Tiêu đề bảng sẽ hiện "trong iframe".
+Nút **"Quét lại"** quét **hết iframe còn hiện trên trang** (chỉ bỏ khung 0×0, xếp hạng giống player lên đầu); dropdown **"Video/Khung"** liệt kê cả video trực tiếp lẫn các khung (Khung 1, Khung 2...), nhiều cái thì chọn trong đó. Bảng dài hơn màn hình thì lướt ngay trong bảng (tiêu đề vẫn đứng yên). Mở tab player riêng **không chạy được trên site này** (player chỉ trả link video khi nhúng trong domain cho phép) nên nút đó chỉ còn để tham khảo.
 
 Lưu ý: file `.srt` lưu theo host của player — chọn 1 lần cho mỗi host là xong.
 
@@ -81,6 +81,7 @@ Lưu ý: file `.srt` lưu theo host của player — chọn 1 lần cho mỗi ho
 | Mục | Chức năng |
 |---|---|
 | ▶ Bắt đầu / ⏸ Dừng (1 nút đổi trạng thái) | Quét video 1 lần rồi chạy / dừng hẳn; chưa có phụ đề thì báo rõ; đã chọn khung iframe thì chạy phụ đề trên khung theo đồng hồ |
+| ▶ Thay player (khớp 100%) | Thế iframe bằng video gốc (HLS) — phụ đề khớp 100% theo giờ video, tua thoải mái; chỉ Safari phát được, Chrome sẽ báo rõ |
 | Video | Chọn video nếu trang có nhiều video, nút Quét lại để tìm video mới mở |
 | File .srt | Chọn file `.srt` / `.vtt` trên máy (lưu sẵn, lần sau khỏi chọn lại) |
 | Link .srt | Tải phụ đề từ link (web nào chặn CORS thì tải file về rồi chọn file) |
