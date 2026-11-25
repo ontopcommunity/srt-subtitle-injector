@@ -28,18 +28,23 @@
  * VIDEO NẰM TRONG IFRAME (player nhúng kiểu <div id="player-wrapper"><iframe ...>):
  *   Trang chính không đọc được giờ phát của video trong iframe khác origin,
  *   và player cũng không gửi giờ ra ngoài (đã đọc code player JW 8.38.10:
- *   không có postMessage nào) — nên phụ đề KHÔNG chèn vào trong iframe mà
- *   là lớp nằm TRÊN khung player ở trang chính, chạy theo đồng hồ riêng:
- *   bấm Bắt đầu cùng lúc bấm play trên video, lệch thì chỉnh ±1s/±5s
- *   (hàng "Đồng hồ" trong bảng), Dừng thì đồng hồ đứng theo, chạy lại thì
- *   tiếp tục từ chỗ cũ. Nút "Quét lại" quét HẾT iframe còn hiện trên trang
- *   (chỉ bỏ khung 0×0) rồi xếp hạng theo độ giống player; dropdown
- *   "Video/Khung" liệt kê cả video trực tiếp lẫn các khung (Khung 1, 2...),
- *   nhiều cái thì chọn trong đó, khung giống player nhất lên đầu.
- *   Muốn đồng bộ chính xác tuyệt đối thì bấm "Mở tab player" (kề bên nút
- *   "Quét lại") — mở tab mới chỉ có player, dán lại lệnh 1 dòng trong tab
- *   đó là chạy (video thành top-level); hoặc trong DevTools bấm khung "top"
- *   phía trên console -> chọn iframe của player -> dán lại lệnh 1 dòng.
+ *   không có postMessage nào) — nên có 2 cách:
+ *   Cách 1 — THAY PLAYER (khớp 100%, tua thoải mái, khuyên dùng): bấm
+ *   "▶ Thay player (khớp 100%)" — tool lấy link HLS gốc của video qua
+ *   proxy cấu hình trên shop ontopdz.shop rồi tạo <video> thật thế chỗ
+ *   iframe trong trang; phụ đề gắn vào video thật nên bám đúng giờ video,
+ *   tua tới đâu là đúng đoạn phụ đề tới đó. Chỉ Safari (iPhone/Mac) phát
+ *   được HLS gốc — Chrome bị host video chặn CORS nên không tải playlist.
+ *   Video thay ra bắt đầu từ 0, quảng cáo của player gốc không còn; bấm
+ *   "Khôi phục player" để về lại player cũ. Cách 2 — ĐỒNG HỒ (mọi trình
+ *   duyệt): bấm Bắt đầu cùng lúc bấm play trên video, phụ đề là lớp nằm
+ *   TRÊN khung player, chạy theo đồng hồ riêng; lệch thì chỉnh ±1s/±5s
+ *   (hàng "Đồng hồ" trong bảng), Dừng thì đồng hồ đứng theo. Nút "Quét
+ *   lại" quét HẾT iframe còn hiện trên trang (chỉ bỏ khung 0×0) rồi xếp
+ *   hạng theo độ giống player; dropdown "Video/Khung" liệt kê cả video
+ *   trực tiếp lẫn các khung (Khung 1, 2...), nhiều cái thì chọn trong đó.
+ *   Mở tab player riêng KHÔNG chạy được trên site này (player chỉ trả link
+ *   video khi nhúng trong domain cho phép) nên nút đó chỉ còn để tham khảo.
  *   File .srt lưu theo host của player.
  *
  * XEM DỌC (tự động khi chạy lệnh / khi bấm Bắt đầu, tắt được trong bảng):
@@ -236,6 +241,17 @@
   let clockFrozen = null;   // null = đồng hồ đang chạy; số = giờ đang đứng yên
   let clockTimer = null;    // interval 250ms — CHỈ chạy ở chế độ khung player
   let lastFrameRect = '';   // rect khung lần cuối gắn lớp phủ (khỏi ghi DOM thừa)
+  // Chế độ THAY PLAYER (khớp 100% theo giờ video, tua thoải mái): lấy link
+  // HLS gốc của video qua proxy cấu hình rồi tạo <video> thật thế chỗ
+  // iframe trong DOM (iframe bị gỡ thì dừng hẳn, khỏi chồng tiếng). Phụ đề
+  // gắn vào <video> thật nên bám theo currentTime + sự kiện seeked — tua
+  // tới đâu là đúng đoạn phụ đề tới đó, không cần đồng hồ riêng nữa.
+  // Chỉ Safari phát được HLS gốc (Chrome bị host video chặn CORS nên không
+  // tải được playlist — hls.js cũng chịu). Proxy cấu hình là route riêng
+  // trên shop của user (ontopdz.shop/api/player-config).
+  const PROXY_BASE = 'https://ontopdz.shop';
+  let nativeVideo = null;   // <video> gốc đang thế chỗ iframe player
+  let replacedIframe = null; // iframe gốc đã thay ra (để khôi phục lại)
   let destroyed = false;
   let scanTimer = 0;         // timer quét thử lại (tối đa vài lần rồi dừng hẳn)
   let scanLeft = 0;
@@ -1104,21 +1120,30 @@
     if (show) syncTime.textContent = fmtTime(getTime());
   }
 
-  // Hàng nút: "Mở tab player" (chỉ hiện khi video nằm trong iframe) kề bên
-  // nút "Quét lại" (dò video thủ công) — 2 nút hay dùng nằm cùng 1 chỗ
+  // Hàng nút: "Thay player" (thế iframe bằng video gốc, khớp 100%) +
+  // "Mở tab player" (chỉ hiện khi video nằm trong iframe) kề bên nút
+  // "Quét lại" (dò video thủ công) — 3 nút hay dùng nằm cùng 1 chỗ
   const playerRow = document.createElement('div');
-  playerRow.style.cssText = 'display:flex;gap:8px;margin:4px 0;';
+  playerRow.style.cssText = 'display:flex;gap:8px;margin:4px 0;flex-wrap:wrap;';
+  const replaceBtn = mkBtn('▶ Thay player (khớp 100%)', '#16a34a');
+  replaceBtn.style.display = 'none';
   const openPlayerBtn = mkBtn('Mở tab player', '#16a34a');
   openPlayerBtn.style.display = 'none';
+  const restoreBtn = mkBtn('Khôi phục player', '#555');
+  restoreBtn.style.display = 'none';
   const rescanBtn = mkBtn('Quét lại');
-  playerRow.append(openPlayerBtn, rescanBtn);
+  playerRow.append(replaceBtn, openPlayerBtn, restoreBtn, rescanBtn);
   body.appendChild(playerRow);
   let noticePlayer = null;
   function showPlayerNotice(players) {
     noticePlayer = players[0];
     openPlayerBtn.style.display = '';
+    if (!replacedIframe) replaceBtn.style.display = '';
   }
-  function hidePlayerNotice() { openPlayerBtn.style.display = 'none'; }
+  function hidePlayerNotice() { openPlayerBtn.style.display = 'none'; replaceBtn.style.display = 'none'; }
+  function updateReplaceBtn() { restoreBtn.style.display = replacedIframe ? '' : 'none'; }
+  replaceBtn.onclick = () => replacePlayer();
+  restoreBtn.onclick = () => restorePlayer();
   openPlayerBtn.onclick = () => {
     if (noticePlayer && noticePlayer.url) (origOpen || window.open).call(window, noticePlayer.url, '_blank');   // dùng window.open gốc để không bị chặn quảng cáo chặn luôn
   };
@@ -1173,7 +1198,7 @@
     const it = scanList[+videoSel.value];
     if (!it) return;
     if (it.kind === 'video') { setVideo(it.el); hidePlayerNotice(); }
-    else { setPickedIframe(it.el); showPlayerNotice([it]); }   // chọn khung -> hiện nút Mở tab player cho đúng khung đó
+    else { setPickedIframe(it.el); showPlayerNotice([it]); }   // chọn khung -> hiện nút Thay player/Mở tab player cho đúng khung đó
   };
   rescanBtn.onclick = () => {
     refreshVideoList();
@@ -1184,7 +1209,7 @@
       hidePlayerNotice();
     } else {
       setPickedIframe(it.el);
-      showPlayerNotice([it]);   // hiện nút Mở tab player cho đúng khung vừa chọn
+      showPlayerNotice([it]);   // hiện nút Thay player/Mở tab player cho đúng khung vừa chọn
     }
     updateStatus();
   };
@@ -1593,6 +1618,85 @@
       ? 'Đã mở tab player + chép lệnh — sang tab mới, dán lệnh vào console rồi bấm Bắt đầu. (Phụ đề ở trang này không sang tab mới được — tìm lại ở tab mới.)'
       : 'Đã mở tab player — sang tab mới, dán lệnh 1 dòng vào console rồi bấm Bắt đầu.'));
   }
+  // Lấy id video từ src của iframe player: /videos/<24 ký tự hex>/
+  function playerVideoId(frameEl) {
+    const s = (frameEl && frameEl.getAttribute('src')) || '';
+    const m = s.match(/\/videos\/([0-9a-f]{24})\b/i);
+    return m ? m[1].toLowerCase() : '';
+  }
+  // Trình duyệt có phát HLS gốc được không (Safari: có; Chrome: không —
+  // host video không gửi CORS nên không tải được playlist, hls.js cũng chịu).
+  function canPlayNativeHls() {
+    try {
+      const v = document.createElement('video');
+      return !!v.canPlayType && v.canPlayType('application/vnd.apple.mpegurl') !== '';
+    } catch (_) { return false; }
+  }
+  // THAY PLAYER: lấy link HLS gốc qua proxy cấu hình rồi tạo <video> thật
+  // thế chỗ iframe trong DOM. Phụ đề gắn vào video thật nên khớp 100% theo
+  // giờ video — tua tới đâu là đúng đoạn phụ đề tới đó, không đồng hồ riêng.
+  // Video thay ra bắt đầu từ 0 (giờ của iframe cũ không đọc được); quảng cáo
+  // của player gốc không còn. Bấm "Khôi phục player" để về lại player cũ.
+  async function replacePlayer() {
+    if (nativeVideo) { setStatus('Đã thay player rồi — đang chạy video gốc.'); return; }
+    const sel = scanList[+videoSel.value];
+    const frame = (sel && sel.kind === 'iframe') ? sel.el
+      : pickedIframe || (findPlayerIframes(1)[0] || {}).el;
+    if (!frame || !document.contains(frame)) {
+      setStatus('Chưa chọn khung player nào — bấm Quét lại rồi chọn Khung trong dropdown.');
+      return;
+    }
+    const id = playerVideoId(frame);
+    if (!id) { setStatus('Không lấy được id video từ khung này — chỉ thay được player của wogplayer.'); return; }
+    if (!canPlayNativeHls()) {
+      setStatus('Trình duyệt này không phát được video gốc (host video chặn Chrome tải playlist) — dùng iPhone/Safari để thay player. Ở lại đây thì bấm Bắt đầu để chạy theo đồng hồ.');
+      return;
+    }
+    setStatus('Đang lấy link video gốc…');
+    let cfg = null;
+    try {
+      const r = await fetch(`${PROXY_BASE}/api/player-config?id=${id}&d=${encodeURIComponent(location.hostname)}`);
+      cfg = await r.json();
+    } catch (_) { /* rớt xuống báo lỗi bên dưới */ }
+    const file = cfg && cfg.sources && cfg.sources[0] && cfg.sources[0].file;
+    if (!file) { setStatus('Không lấy được link video gốc — kiểm tra mạng rồi thử lại.'); return; }
+    const v = document.createElement('video');
+    v.src = file;
+    v.controls = true;      // thanh tua/chỉnh âm lượng của video gốc — tua thoải mái
+    v.playsInline = true;
+    v.preload = 'auto';
+    v.style.cssText = 'width:100%;height:100%;display:block;background:#000;';
+    const parent = frame.parentElement;
+    if (!parent) { setStatus('Không thế chỗ được khung player.'); return; }
+    stopRunning();   // dừng chế độ đồng hồ nếu đang chạy
+    parent.replaceChild(v, frame);   // iframe bị gỡ thì nó dừng hẳn, khỏi chồng tiếng
+    replacedIframe = frame;
+    nativeVideo = v;
+    pickedIframe = null;   // không còn khung để chạy đồng hồ nữa
+    setVideo(v);
+    hidePlayerNotice();
+    updateReplaceBtn();
+    if (cues.length) {
+      startRunning();
+      setStatus('Đã thay player bằng video gốc — phụ đề khớp 100% theo video, tua thoải mái. (Quảng cáo của player gốc không còn; bấm "Khôi phục player" để về lại.)');
+    } else {
+      setStatus('Đã thay player bằng video gốc — chưa có phụ đề: chọn file .srt hoặc tìm trên SubtitleCat rồi bấm Bắt đầu (sẽ khớp 100%, tua thoải mái).');
+    }
+  }
+  // Trả lại player gốc (iframe cũ gắn lại chỗ cũ, tải lại từ đầu).
+  function restorePlayer() {
+    if (!replacedIframe || !nativeVideo) return;
+    stopRunning();
+    const parent = nativeVideo.parentElement;
+    if (parent) parent.replaceChild(replacedIframe, nativeVideo);
+    nativeVideo = null;
+    pickedIframe = replacedIframe;
+    replacedIframe = null;
+    setVideo(null);
+    showPlayerNotice([{ el: pickedIframe, url: pickedIframe.getAttribute('src') || '' }]);
+    updateReplaceBtn();
+    setStatus('Đã khôi phục player gốc. Bấm Bắt đầu để chạy phụ đề theo đồng hồ.');
+  }
   // Cuộn tới khung tìm phụ đề + focus ô gõ (khi bấm Bắt đầu mà chưa có phụ đề)
   function focusSubSearch() {
     try { catBox.scrollIntoView({ block: 'nearest' }); catInput.focus(); } catch (_) {}
@@ -1635,6 +1739,7 @@
     destroyed = true;
     clearTimeout(scanTimer);
     clearTimeout(portraitTimer);
+    if (replacedIframe) restorePlayer();   // trả lại player gốc trước khi gỡ tool
     stopRunning();
     exitPortrait();
     exitPickMode();
@@ -1660,10 +1765,13 @@
     start: () => requestStart(false),
     stop: stopRunning,
     setVideo,
+    replacePlayer,
+    restorePlayer,
     refreshVideoList,
     loadText,
     get cues() { return cues; },
     get video() { return video; },
+    get nativeVideo() { return nativeVideo; },
     get running() { return running; },
     get time() { return getTime(); },
     get iframeMode() { return iframeMode; },
