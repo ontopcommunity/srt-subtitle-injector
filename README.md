@@ -16,17 +16,15 @@ fetch('https://raw.githubusercontent.com/ontopcommunity/srt-subtitle-injector/ma
 2. Bảng điều khiển hiện ở góc phải màn hình. Chọn file `.srt` **1 lần duy nhất** — file được lưu sẵn trong máy, lần sau chạy lệnh là có sẵn, không cần chọn lại (cũng có thể dán link `.srt` hoặc kéo-thả file vào bảng).
 3. Bấm **▶ Bắt đầu** — tool quét video đang chạy 1 lần duy nhất, chèn phụ đề vào rồi ngừng quét hẳn. Phụ đề tự hiện theo đúng thời gian trong file, bám theo video kể cả khi xem fullscreen. Nút là **1 nút đổi trạng thái**: bấm xong thành **⏸ Dừng** (đang chạy), bấm nữa thì dừng. Chưa có phụ đề thì bấm không chạy mà bảng báo rõ + cuộn tới khung tìm phụ đề. Đã chọn khung iframe mà không có video trực tiếp thì bấm **Bắt đầu** sẽ chạy phụ đề ngay ở trang chính, lớp nằm trên khung player, theo đồng hồ (bấm cùng lúc bấm play; lệch thì chỉnh ±1s/±5s).
 
-## Xem dọc — tự động phóng to lấp màn dọc, vẫn ở nguyên trang
+## Tự chuyển sang tab video
 
-Khi chạy lệnh (hoặc bấm **▶ Bắt đầu**), video tự động phóng to lấp màn hình **dọc** mà không chuyển tab, không dùng fullscreen ngang của trình duyệt — và **không xoay video**:
+Khi chạy lệnh trên trang có video nằm trong khung player (không có video trực tiếp), tool hiện **popup giữa màn hình, đếm ngược 10 giây** rồi tự mở tab video — sang tab mới, chạy lại lệnh 1 dòng rồi bấm **Bắt đầu** là phụ đề chạy theo video. Popup ghi rõ video nằm trong khung nên phụ đề không chạy được ở trang này, và dặn chạy lại lệnh sau khi chuyển tab.
 
-- Video ngang (16:9...) giữ nguyên chiều ngang, phóng to lấp hết chiều rộng màn dọc, căn giữa theo chiều cao. Thanh **"Độ phóng"** kéo to thêm (tối đa 2x, sẽ cắt 2 bên nếu phóng quá).
-- Video dọc sẵn thì phóng to lấp chiều cao.
-- Phụ đề vẫn bám đúng khung hình đang hiển thị, chữ thẳng để đọc.
-- Thoát bằng nút **"✕ Thoát xem dọc"** góc trái trên, phím **Esc**, hoặc nút **"Xem dọc"** trong bảng. Đổi video / xoay màn hình tự tính lại cỡ.
-- Bỏ tick **"Phóng to dọc khi bắt đầu"** trong bảng nếu không muốn tự động.
+- Bấm **"Chuyển ngay"** để chuyển luôn không cần đợi; bấm **"Hủy"** để ở lại trang này (dùng đồng hồ hoặc thay player như cũ).
+- Trình duyệt chỉ cho mở tab trong cú bấm thật nên nếu hết 10 giây mà mở bị chặn thì popup giữ lại và báo rõ để bấm **"Chuyển ngay"**.
+- Lưu ý: phải mở tab từ trang đang nhúng — mở tab bằng tay (dán link) thì player có thể không trả link video.
 
-Nút **⏯** trong bảng để tạm dừng / tiếp tục video khi đang xem dọc (lúc này thanh điều khiển gốc của player bị che sau video).
+Nút **⏯** trong bảng để tạm dừng / tiếp tục video đang chạy.
 
 ## Tìm phụ đề trên SubtitleCat — không cần tải file về máy
 
@@ -36,7 +34,7 @@ Trong bảng có khung **"🔍 Tìm phụ đề (SubtitleCat)"**:
 2. Bấm 1 kết quả → hiện list ngôn ngữ (tiếng Việt lên đầu, rồi English, rồi các tiếng khác).
 3. Bấm 1 ngôn ngữ → file `.srt` được tải về và **chạy phụ đề luôn** (đồng thời lưu sẵn trong máy như file tự chọn).
 
-Vì subtitlecat.com chặn đọc từ web khác (CORS), script tải qua các đường trung gian: r.jina.ai (trang HTML), api.cors.lol / allorigins / codetabs (file .srt) — chạy song song tất cả các đường, đường nào trả về nội dung đúng trước thì lấy ngay (thường 2–3 giây), trang báo lỗi bị loại. Nếu tất cả đều bận, bảng báo rõ lý do từng đường, đợi 1 phút rồi bấm Tìm lại.
+Vì subtitlecat.com chặn đọc từ web khác (CORS), script tải qua proxy riêng trên shop trước (ontopdz.shop/api/subtitle-proxy — tải hộ bằng server, không giới hạn lượt), rớt thì mới đua các đường công cộng: r.jina.ai (trang HTML), api.cors.lol / allorigins / codetabs (file .srt) — đường nào trả về nội dung đúng trước thì lấy ngay (thường 2–3 giây), trang báo lỗi bị loại. Nếu tất cả đều bận, bảng báo rõ lý do từng đường, đợi 1 phút rồi bấm Tìm lại.
 
 ## Chặn quảng cáo nhảy trang
 
@@ -65,7 +63,7 @@ Trang chính **không đọc được giờ phát** của video trong iframe kh�
 1. **Thay player (khớp 100%, tua thoải mái — khuyên dùng):** chọn khung trong dropdown **"Video/Khung"** rồi bấm **"▶ Thay player (khớp 100%)"** — tool lấy link HLS gốc của video qua proxy trên shop rồi tạo `<video>` thật thế chỗ iframe trong trang. Phụ đề gắn vào video thật nên bám đúng giờ video: tua tới đâu là đúng đoạn phụ đề tới đó, không cần đồng hồ riêng. Chỉ Safari (iPhone/Mac) phát được HLS gốc — Chrome bị host video chặn nên không tải được playlist (bấm nút sẽ báo rõ). Video thay ra bắt đầu từ 0, quảng cáo của player gốc không còn; bấm **"Khôi phục player"** để về lại player cũ.
 2. **Đồng hồ (mọi trình duyệt):** bấm **Bắt đầu cùng lúc bấm play** trên video — phụ đề là **lớp nằm trên khung player ở trang chính**, chạy theo đồng hồ riêng. Lệch thì chỉnh bằng hàng **"Đồng hồ"** trong bảng (±1s/±5s, ↺ về 0:00); bấm **Dừng** thì đồng hồ đứng theo, bấm **Bắt đầu** lại thì tiếp tục từ chỗ cũ.
 
-Nút **"Quét lại"** quét **hết iframe còn hiện trên trang** (chỉ bỏ khung 0×0, xếp hạng giống player lên đầu); dropdown **"Video/Khung"** liệt kê cả video trực tiếp lẫn các khung (Khung 1, Khung 2...), nhiều cái thì chọn trong đó. Bảng dài hơn màn hình thì lướt ngay trong bảng (tiêu đề vẫn đứng yên). Mở tab player riêng **không chạy được trên site này** (player chỉ trả link video khi nhúng trong domain cho phép) nên nút đó chỉ còn để tham khảo.
+Nút **"Quét lại"** quét **hết iframe còn hiện trên trang** (chỉ bỏ khung 0×0, xếp hạng giống player lên đầu); dropdown **"Video/Khung"** liệt kê cả video trực tiếp lẫn các khung (Khung 1, Khung 2...), nhiều cái thì chọn trong đó. Bảng dài hơn màn hình thì lướt ngay trong bảng (tiêu đề vẫn đứng yên). Chạy lệnh trên trang có video trong khung thì tool tự mở tab video sau 10 giây (popup đếm ngược giữa màn hình) — xem mục **Tự chuyển sang tab video** ở trên. Nút **"Mở tab player"** trong bảng cũng mở tab đó bất cứ lúc nào.
 
 Lưu ý: file `.srt` lưu theo host của player — chọn 1 lần cho mỗi host là xong.
 
